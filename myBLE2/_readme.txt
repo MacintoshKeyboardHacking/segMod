@@ -131,29 +131,6 @@ c boot fails if pulled high, strapping pin
 d outputs PWM signal at boot, strapping pin
 e outputs PWM signal at boot, must be LOW to enter flashing mode
 f sometimes connected to on-board LED, must be left floating or LOW to enter flashing mode
+GPIO 6 to GPIO 11 (connected to the ESP32 integrated SPI flash memory – not recommended to use).
 * ADC2 pins cannot be used when Wi-Fi is used.
-
-
-
-Strapping Pins
-
-The ESP32 chip has the following strapping pins:
-
-    GPIO 0 (must be LOW to enter boot mode)
-    GPIO 2 (must be floating or LOW during boot)
-    GPIO 4
-    GPIO 5 (must be HIGH during boot)
-    GPIO 12 (must be LOW during boot)
-    GPIO 15 (must be HIGH during boot)
-
-Pins HIGH at Boot
-
-Some GPIOs change their state to HIGH or output PWM signals at boot or reset. This means that if you have outputs connected to these GPIOs you may get unexpected results when the ESP32 resets or boots.
-
-    GPIO 1
-    GPIO 3
-    GPIO 5
-    GPIO 6 to GPIO 11 (connected to the ESP32 integrated SPI flash memory – not recommended to use).
-    GPIO 14
-    GPIO 15
 
