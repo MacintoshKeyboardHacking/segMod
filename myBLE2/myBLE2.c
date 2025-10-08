@@ -5,7 +5,7 @@
 // bluetooth is not currently supported, but I've had it working in the past (myBLEv1
 // project) so it shouldn't be too bad... this release spent a lot of time laying the
 // groundwork with message fragmentation and packet validation
-// 
+//
 // for demo and discussion see my livestreams, https://www.youtube.com/@MacintoshKeyboardHacking/streams
 
 #include <stdio.h>
@@ -13,7 +13,6 @@
 #include <string.h>
 #include <stdint.h>
 
-//#define DEBUG output
 
 #ifdef ARDUINO
 #define ESPLED sure
@@ -24,6 +23,11 @@
 
 #include <HardwareSerial.h>
 HardwareSerial VCU (1);
+
+#define NUM_LEDS 16
+#define FASTLED_LED_OVERCLOCK 1.4
+#include <FastLED.h>
+static CRGB leds[NUM_LEDS];
 
 #else
 #include <unistd.h>
@@ -40,6 +44,7 @@ unsigned long millis(void) {
 
 
 typedef int16_t word;
+#define DEBUG output
 #endif
 
 typedef unsigned char byte;
@@ -77,14 +82,20 @@ static byte hb2[] = {0x5a, 0xa5, 0x00, 0x04, 0x16, 0x7b, 0x02, 0x68, 0xff};
 static byte hb3[] = {0x5a, 0xa5, 0x00, 0x23, 0x16, 0x01, 0xfc, 0xc9, 0xfe};
 // cmdZ=b'\x5a\xa5\x00\x23\x16\x01\xfa\xcb\xfe'
 
+// hand calculated VCU subscription for speed and battery
+static byte bSub[] = {0x5a, 0xa5, 0x0c, 0x23, 0x16, 0x03, 0xfd, 0x01, 0x0a, 0x44, 0x6c, 0xe5, 0x6f, 0x10, 0x64, 0xd0, 0xf6, 0xa4, 0x8, 0xc5, 0xf9};
+
 
 static int hbDelay = 2400;
 static int hbInactive = 60000;
 static int hbPhase = 0;
 
+static int myPower = 1;
 
 #ifdef ESPLED
 #include "hal/gpio_ll.h" // GPIO register functions
+
+// gamma correct linear light
 static word table[] = {0x0000, 0x0003, 0x0008, 0x000f, 0x0018, 0x0023, 0x0030, 0x003f, 0x0050, 0x0063, 0x0078, 0x008f, 0x00a8, 0x00c3, 0x00e0, 0x00ff, 0x0120, 0x0143, 0x0168, 0x018f, 0x01b8, 0x01e3, 0x0210, 0x023f, 0x0270, 0x02a3, 0x02d8, 0x030f, 0x0348, 0x0383, 0x03c0, 0x03ff, 0x0440, 0x0483, 0x04c8, 0x050f, 0x0558, 0x05a3, 0x05f0, 0x063f, 0x0690, 0x06e3, 0x0738, 0x078f, 0x07e8, 0x0843, 0x08a0, 0x08ff, 0x0960, 0x09c3, 0x0a28, 0x0a8f, 0x0af8, 0x0b63, 0x0bd0, 0x0c3f, 0x0cb0, 0x0d23, 0x0d98, 0x0e0f, 0x0e88, 0x0f03, 0x0f80, 0x0fff, 0x1080, 0x1103, 0x1188, 0x120f, 0x1298, 0x1323, 0x13b0, 0x143f, 0x14d0, 0x1563, 0x15f8, 0x168f, 0x1728, 0x17c3, 0x1860, 0x18ff, 0x19a0, 0x1a43, 0x1ae8, 0x1b8f, 0x1c38, 0x1ce3, 0x1d90, 0x1e3f, 0x1ef0, 0x1fa3, 0x2058, 0x210f, 0x21c8, 0x2283, 0x2340, 0x23ff, 0x24c0, 0x2583, 0x2648, 0x270f, 0x27d8, 0x28a3, 0x2970, 0x2a3f, 0x2b10, 0x2be3, 0x2cb8, 0x2d8f, 0x2e68, 0x2f43, 0x3020, 0x30ff, 0x31e0, 0x32c3, 0x33a8, 0x348f, 0x3578, 0x3663, 0x3750, 0x383f, 0x3930, 0x3a23, 0x3b18, 0x3c0f, 0x3d08, 0x3e03, 0x3f00, 0x3fff, 0x4100, 0x4203, 0x4308, 0x440f, 0x4518, 0x4623, 0x4730, 0x483f, 0x4950, 0x4a63, 0x4b78, 0x4c8f, 0x4da8, 0x4ec3, 0x4fe0, 0x50ff, 0x5220, 0x5343, 0x5468, 0x558f, 0x56b8, 0x57e3, 0x5910, 0x5a3f, 0x5b70, 0x5ca3, 0x5dd8, 0x5f0f, 0x6048, 0x6183, 0x62c0, 0x63ff, 0x6540, 0x6683, 0x67c8, 0x690f, 0x6a58, 0x6ba3, 0x6cf0, 0x6e3f, 0x6f90, 0x70e3, 0x7238, 0x738f, 0x74e8, 0x7643, 0x77a0, 0x78ff, 0x7a60, 0x7bc3, 0x7d28, 0x7e8f, 0x7ff8, 0x8163, 0x82d0, 0x843f, 0x85b0, 0x8723, 0x8898, 0x8a0f, 0x8b88, 0x8d03, 0x8e80, 0x8fff, 0x9180, 0x9303, 0x9488, 0x960f, 0x9798, 0x9923, 0x9ab0, 0x9c3f, 0x9dd0, 0x9f63, 0xa0f8, 0xa28f, 0xa428, 0xa5c3, 0xa760, 0xa8ff, 0xaaa0, 0xac43, 0xade8, 0xaf8f, 0xb138, 0xb2e3, 0xb490, 0xb63f, 0xb7f0, 0xb9a3, 0xbb58, 0xbd0f, 0xbec8, 0xc083, 0xc240, 0xc3ff, 0xc5c0, 0xc783, 0xc948, 0xcb0f, 0xccd8, 0xcea3, 0xd070, 0xd23f, 0xd410, 0xd5e3, 0xd7b8, 0xd98f, 0xdb68, 0xdd43, 0xdf20, 0xe0ff, 0xe2e0, 0xe4c3, 0xe6a8, 0xe88f, 0xea78, 0xec63, 0xee50, 0xf03f, 0xf230, 0xf423, 0xf618, 0xf80f, 0xfa08, 0xfc03, 0xfe00, 0xffff};
 //  for (int a=1; a<257; a++) {int b=(a*a)-1; printf("0x%04x, ",b);}
 
@@ -118,6 +129,10 @@ setup () {
 
   while (!Serial || !VCU);
   Serial.write (initStr, sizeof (initStr));
+
+  FastLED.addLeds<WS2812, 23, GRB>(leds, NUM_LEDS);
+  FastLED.clear();
+  FastLED.show();
 #else
   comPort = open ("/dev/ttyUSB0", O_RDWR | O_NOCTTY | O_NONBLOCK);
   datIn = fopen ("test.bin", "rb");  // read binary
@@ -139,6 +154,9 @@ setup () {
   ledcAttachChannel(LGpin, P1freq, 16, P1chan);
   ledcAttachChannel(LBpin, P1freq, 16, P1chan);
 
+  //  ledcAttachPin(GPIO_pin, PWM_Ch);
+  //  ledcSetup(PWM_Ch, PWM_Freq, PWM_Res);
+
   ledcWrite (LRpin, 0x80);
   ledcWrite (LGpin, 0x01);
   ledcWrite (LBpin, 0x80);
@@ -157,40 +175,42 @@ loop ()
 
   // Take care of the heartbeat functionality
   if (millis() - timeNow > hbDelay) {
+    if (myPower) {
 #ifdef ARDUINO
-    switch (hbPhase) {
-      case 0:
-        VCU.write (hb1, sizeof (hb1));
-        break;
-      case 1:
-        VCU.write (hb3, sizeof (hb3));
-        break;
-      case 2:
-        VCU.write (hb2, sizeof (hb2));
-        break;
-      case 3:
-        VCU.write (hb3, sizeof (hb3));
-        break;
-    }
+      switch (hbPhase) {
+        case 0:
+          VCU.write (hb1, sizeof (hb1));
+          break;
+        case 1:
+          VCU.write (hb3, sizeof (hb3));
+          break;
+        case 2:
+          VCU.write (hb2, sizeof (hb2));
+          break;
+        case 3:
+          VCU.write (bSub, sizeof (bSub));
+          break;
+      }
 #else
-    switch (hbPhase) {
-      case 0:
-        write(comPort, hb1, sizeof (hb1));
-        break;
-      case 1:
-        write(comPort, hb3, sizeof (hb3));
-        break;
-      case 2:
-        write(comPort, hb2, sizeof (hb2));
-        break;
-      case 3:
-        write(comPort, hb3, sizeof (hb3));
-        break;
-    }
+      switch (hbPhase) {
+        case 0:
+          write(comPort, hb1, sizeof (hb1));
+          break;
+        case 1:
+          write(comPort, hb3, sizeof (hb3));
+          break;
+        case 2:
+          write(comPort, hb2, sizeof (hb2));
+          break;
+        case 3:
+          write(comPort, bSub, sizeof (bSub));
+          break;
+      }
 #endif
-    hbPhase ++;
-    if (hbPhase > 3) {
-      hbPhase = 0;
+      hbPhase ++;
+      if (hbPhase > 3) {
+        hbPhase = 0;
+      }
     }
     timeNow += hbDelay;
   }
@@ -227,11 +247,17 @@ loop ()
 
 
       // static interface routing for now: ie: only transmit to VCU or USB
-      if ((ifb == 1) || (ifb == 0)) {
+      if (myPower) {
 #ifdef ARDUINO
-        VCU.write (ifTX[ifb], TXlen);
+        if (ifb == 1) {
+          VCU.write (ifTX[ifb], TXlen);
+        } else if (ifb == 0) {
+          Serial.write (ifTX[ifb], TXlen);
+        }
 #else
-        write(comPort, ifTX[ifb], TXlen);
+        if (ifb == 1) {
+          write(comPort, ifTX[ifb], TXlen);
+        }
 #endif
       }
     }
@@ -252,7 +278,7 @@ loop ()
         break;
       case 1:   // ESP32>VCU or local serialport on linux
 #ifdef ARDUINO
-        rxBytes = VCU.readBytes (RXbuf, rxBS);
+        rxBytes = VCU.readBytes(RXbuf, rxBS);
 #else
         rxBytes = read(comPort, RXbuf, rxBS );
 #endif
@@ -268,6 +294,7 @@ loop ()
 
     // Did we get RX data?  buffer and process
     if (rxBytes > 0) {
+      myPower = 1;
       memcpy (&ifRX[ifb][ifRXlen[ifb]], &RXbuf, rxBytes);
       ifRXlen[ifb] += rxBytes;
 
@@ -354,11 +381,11 @@ loop ()
                   case 7:
                     dECU = 4;
                     break;
-                  case 0x23:
+                  case 0x23:  // reserved 0x400 bytes
                     dECU = 5;
                     break;
                   case 0x3e:
-                    dECU = 6;
+                    dECU = 7;
                     break;
 #ifdef DEBUG
                   default:
@@ -473,10 +500,10 @@ loop ()
                             break;
                         }
 
-                        // replace value in new buffer
-                        *ECUptr = (newFlags & (modifier << 8) & newValue);
-                        TXpkt[v + 7] = txValue;
                       }
+                      // replace value in new buffer
+                      *ECUptr = (newFlags | (modifier << 8) | newValue);
+                      TXpkt[v + 7] = txValue;
                     }
 
                     if (grpChange) {
@@ -508,9 +535,6 @@ loop ()
                   TXpkt[7] = 1; // write success
                   TXpkt[8] = 0; // write success
                 }
-
-
-
 
 
                 // recalculate packet checksum
@@ -565,16 +589,82 @@ loop ()
         }   // just finished, "yes it's a packet"
       }
     }
+    // BUG hardcoded offsets are bad
+
+
+    int mySpeed = ((ECU32[(0x200 * 5) + (0xfe * 2) + 1 ] & 0xff ) ); //23:fe>>8
+    int myBatt = (ECU32[(0x200 * 5) + (0xff * 2) + 1 ] ) & 0xff; //23:ff>>8
+
+    int testPower = ((ECU32[(0x200 * 3) + (0x51 * 2)  ] & 0xffff ) );
+    if ((testPower == 0) && (myPower > 0)) {
+      myPower = 0;
 #ifdef ESPLED
+      FastLED.clear();
+      FastLED.show();
+      FastLED.show();
+#endif
+    }
+
+    static int myTopSpd = 0;
+    if (mySpeed > myTopSpd) {
+      myTopSpd = mySpeed;
+    }
+    static int mySpeedAvg;
+    mySpeedAvg *= 7;
+    mySpeedAvg += mySpeed;
+    mySpeedAvg /= 8;
+#ifdef ESPLED
+    for (int l = 0; l < 8; l++) {
+      int c1 = 0;
+      int c2 = 0;
+      int c3 = 0;
+      if (mySpeed > (l * 10)) {
+        c1 = 255;
+      }
+      if (mySpeedAvg > (l * 10)) {
+        c2 = 31;
+        c3 = 3;
+      }
+      if (myTopSpd > (l * 10)) {
+        c3 = 31;
+      }
+      leds[l].setRGB(c2, c1, c3);
+    }
+
+    for (int l = 0; l < 8; l++) {
+      int c1 = (myBatt * myBatt) >> 8;
+      if (c1 > 40) {
+        c1 = 40;
+      }
+      int c2 = 40 - c1;
+      int c3 = 0;
+      if (((l + 1) * 10) > myBatt) {
+        c1 = 0;
+        c2 = 0;
+        c3 = 0;
+      }
+      leds[15 - l].setRGB(c2, c1, 0);
+    }
+
+
+    //    leds[0].setRGB( mySpeed, 3, 1);
+    //                  ECUptr = &ECU32[(0x200 * dECU) + (pADR * 2)];
     if (ledDly) {
       ledDly--;
     } else {
-      ledDly = 3000;
+      ledDly = 300;
       ledBri++;
       if (ledBri > 255) {
         ledBri = 0;
+        if (myTopSpd) {
+          myTopSpd--;
+        }
       }
       ledcWrite (LGpin, table[ledBri]);
+      if (myPower) {
+        FastLED.show();
+      }
+
     }
 #endif
 
