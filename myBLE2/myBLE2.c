@@ -1,8 +1,9 @@
 // myBLEv2, MIT license
 // a Segway "3 series" BLE display replacement on Arduino ESP32
 //
-// this is now beta.  fixed some TX bugs, added additional UART
-// added speedometer and battery gauge on 2x8 WS2812s 
+// this is beta two.  fixed some power bugs, blocked CMD 20 BLE debugs
+// added auto-headlight, speed mode, boost and brake indicators
+// added speedometer and battery gauge on 2x8 WS2812s
 // bluetooth is not currently supported, but I've had it working in the past (myBLEv1
 // project) so it shouldn't be too bad... this release spent a lot of time laying the
 // groundwork with message fragmentation and packet validation
@@ -69,6 +70,9 @@ static unsigned long *ECUptr; // convenience pointer
 
 FILE *datIn;
 
+static int flicker = 0;
+static int flash = 0;
+
 static int t, u;
 static int i, j, k, l;
 
@@ -81,22 +85,27 @@ static unsigned long timeNow;
 static byte initStr[] = {0x5a, 0xa5, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff};
 
 // heartbeat PING 04>16 7a:
-static byte hb1[] = {0x5a, 0xa5, 0x00, 0x04, 0x16, 0x7a, 0x00, 0x6b, 0xff};
+static byte hb0[] = {0x5a, 0xa5, 0x00, 0x04, 0x16, 0x7a, 0x00, 0x6b, 0xff};
 
 // heartbeat PONG 04>16 7b:
-static byte hb2[] = {0x5a, 0xa5, 0x00, 0x04, 0x16, 0x7b, 0x02, 0x68, 0xff};
+static byte hb1[] = {0x5a, 0xa5, 0x00, 0x04, 0x16, 0x7b, 0x02, 0x68, 0xff};
 
 // heartbeat stop the error beep, any read from 0x23 to 0x16 works
-static byte hb3[] = {0x5a, 0xa5, 0x00, 0x23, 0x16, 0x01, 0xfc, 0xc9, 0xfe};
+static byte hb2[] = {0x5a, 0xa5, 0x00, 0x23, 0x16, 0x01, 0xfc, 0xc9, 0xfe};
 
-// hand calculated VCU subscription for speed and battery
-static byte bSub[] = {0x5a, 0xa5, 0x0c, 0x23, 0x16, 0x03, 0xfd, 0x01, 0x0a, 0x44, 0x6c, 0xe5, 0x6f, 0x10, 0x64, 0xd0, 0xf6, 0xa4, 0x8, 0xc5, 0xf9};
+// auto-headlight on (need test)
+//static byte light[] = {0x5a, 0xa5, 0x00, 0x23, 0x16, 0x80, 0x00, 0x46, 0xff, 0x5a, 0xa5, 0x02, 0x23, 0x16, 0x03, 0xd2, 0x00, 0x00, 0xef, 0xfe};
+static byte light[] = {0x5a, 0xa5, 0x02, 0x23, 0x16, 0x03, 0xd2, 0x00, 0x00, 0xef, 0xfe};
+
+// VCU subscription like stock BLE
+static byte bSub[] = {0x5a, 0xa5, 0xbb, 0x23, 0x16, 0x02, 0xfd, 0x01, 0x0a, 0x89, 0x52, 0x76, 0x7e, 0x10, 0x89, 0x7a, 0xaa, 0xdd, 0x10, 0xc5, 0x0a, 0x44, 0xac, 0x10, 0xb3, 0xd1, 0xdd, 0xa3, 0x10, 0xb2, 0xd1, 0xdd, 0xa3, 0x10, 0xad, 0xd1, 0xdd, 0xa3, 0x10, 0xac, 0xd1, 0xdd, 0xa3, 0x10, 0xaf, 0xd1, 0xdd, 0xa3, 0x10, 0x44, 0x6c, 0xe5, 0x6f, 0x10, 0xae, 0x48, 0x4a, 0xad, 0x10, 0x9e, 0xf9, 0x96, 0x90, 0x10, 0xe4, 0x65, 0x9b, 0x9c, 0x10, 0x92, 0x00, 0x9a, 0x22, 0x10, 0x64, 0xd0, 0xf6, 0xa4, 0x08, 0x12, 0x45, 0x6a, 0x61, 0x08, 0x70, 0xe0, 0xe2, 0xb3, 0x08, 0x8a, 0x38, 0x99, 0xe7, 0x08, 0xda, 0xb2, 0x89, 0x86, 0x04, 0xa1, 0x24, 0x01, 0x7e, 0x04, 0x4b, 0xcb, 0xf9, 0xf8, 0x04, 0x75, 0x1d, 0xbc, 0xa2, 0x04, 0x9f, 0x6f, 0x41, 0x42, 0x01, 0x98, 0x8d, 0xb2, 0x17, 0x01, 0x29, 0x0a, 0xbc, 0xcf, 0x01, 0xcc, 0xba, 0xe7, 0x88, 0x01, 0xe5, 0xe9, 0x99, 0x0c, 0x01, 0x61, 0xe9, 0x41, 0x18, 0x01, 0x8a, 0xa8, 0xb5, 0x16, 0x01, 0xb3, 0xd7, 0xef, 0x70, 0x01, 0x03, 0x26, 0x1a, 0x75, 0x01, 0x39, 0xb0, 0xbf, 0x06, 0x01, 0x3b, 0x26, 0xe8, 0x20, 0x01, 0x55, 0x25, 0x1a, 0x7f, 0x01, 0x2b, 0x71, 0x39, 0xf7, 0x01, 0x6b, 0x64, 0x4e, 0xac, 0x01, 0x19, 0xbd, 0x86, 0x00, 0x01, 0x1a, 0x93, 0x7d, 0x0c, 0x01, 0x37, 0xaf};
 
 // delay between heartbeat packets
 static int hbDelay = 2400;
 static int hbPhase = 0;
 
 static int myPower = 1;
+static int myDrive = 0;
 
 #ifdef ESPLED
 #include "hal/gpio_ll.h"  // GPIO register functions
@@ -137,6 +146,7 @@ void setup () {
 
   while (!Serial || !VCU || !BLE);
   Serial.write (initStr, sizeof (initStr));
+  VCU.write (light, sizeof (light));    // because we don't have a light sensor
 
   FastLED.addLeds<WS2812, 23, GRB>(leds, NUM_LEDS);
   FastLED.clear();
@@ -180,41 +190,40 @@ void loop () {
   if (millis() - timeNow > hbDelay) {
     if (myPower) {
 #ifdef ARDUINO
-      switch (hbPhase) {
-        case 0:
-          VCU.write (hb1, sizeof (hb1));
-          break;
-        case 1:
-          VCU.write (hb3, sizeof (hb3));
-          break;
-        case 2:
-          VCU.write (hb2, sizeof (hb2));
-          break;
-        case 3:
-          VCU.write (bSub, sizeof (bSub));
-          break;
+      if (hbPhase) {
+        VCU.write(hb1, sizeof(hb1));
+        hbPhase = 0;
+      } else {
+        VCU.write(hb0, sizeof(hb0));
+        hbPhase = 1;
       }
 #else
-      switch (hbPhase) {
-        case 0:
-          write(comPort, hb1, sizeof (hb1));
-          break;
-        case 1:
-          write(comPort, hb3, sizeof (hb3));
-          break;
-        case 2:
-          write(comPort, hb2, sizeof (hb2));
-          break;
-        case 3:
-          write(comPort, bSub, sizeof (bSub));
-          break;
+      if (hbPhase) {
+        write(comPort, hb1, sizeof(hb1));
+        hbPhase = 0;
+      } else {
+        write(comPort, hb0, sizeof(hb0));
+        hbPhase = 1;
       }
 #endif
-      hbPhase ++;
-      if (hbPhase > 3) {
-        hbPhase = 0;
-      }
     }
+
+    if (myDrive) {
+#ifdef ARDUINO
+      if (hbPhase) {
+        VCU.write(hb2, sizeof(hb2));
+      } else {
+        VCU.write(bSub, sizeof(bSub));
+      }
+#else
+      if (hbPhase) {
+        write(comPort, hb2, sizeof(hb2));
+      } else {
+        write(comPort, bSub, sizeof(bSub));
+      }
+#endif
+    }
+
     timeNow += hbDelay;
   }
 
@@ -355,6 +364,10 @@ void loop () {
               byte pDST = TXpkt[4];
               byte pCMD = TXpkt[5];
               byte pADR = TXpkt[6]; // don't forget ... words not bytes
+
+              if (pCMD == 0x20) {
+                doXmit = 0;
+              }
 
               // detect a variable update and process against our ECU map
               int ECU = 0;
@@ -589,11 +602,21 @@ void loop () {
     }
 
     // BUG hardcoded offsets are bad
-    int mySpeed = ((ECU32[(0x200 * 5) + (0xfe * 2) + 1 ] & 0xff ) ); //23:fe>>8
-    int myBatt = (ECU32[(0x200 * 5) + (0xff * 2) + 1 ] ) & 0xff; //23:ff>>8
+    //modinit     int mySpeed = ((ECU32[(0x200 * 5) + (0xfe * 2) + 1 ] & 0xff ) ); //23:fe>>8
+    int mySpeed = ((ECU32[(0x200 * 5) + (0x106 * 2) + 1 ] & 0xff ) ); //23:fe>>8
+    int myBoost = ((ECU32[(0x200 * 5) + (0x109 * 2) + 1 ] & 0xff ) );
+    int myBoostFlag = ((ECU32[(0x200 * 5) + (0x10a * 2)  ] & 0xff ) ); // boost
 
-    //    int testPower = ((ECU32[(0x200 * 3) + (0x51 * 2)  ] & 0xffff ) );  // 04:51, actually means "unlocked"
-    int testPower = ((ECU32[(0x200 * 5) + (0x25 * 2)  ] & 0xffff ) ); // 23:25, screen on
+    //modinit    int myBatt = (ECU32[(0x200 * 5) + (0xff * 2) + 1 ] ) & 0xff; //23:ff>>8
+    int myBatt = (ECU32[(0x200 * 5) + (0x10b * 2) + 1 ] ) & 0xff; //23:ff>>8
+    int myMode = (ECU32[(0x200 * 5) + (0x10d * 2) + 1 ] ) & 0xff;
+    int myParm = (ECU32[(0x200 * 5) + (0x10e * 2) + 1 ] ) & 0x80; // 2WD
+    int myBrake = (ECU32[(0x200 * 5) + (0x10e * 2) + 1 ] ) & 0x01; //eBrake
+    //    int myTest = (((ECU32[(0x200 * 5) + (0x10e * 2) + 1 ] ) ^ 0x58)  & ~0xa2) + (ECU32[(0x200 * 5) + (0x10e * 2) + 2 ] );
+    int myTest = (ECU32[(0x200 * 5) + (0x10f * 2) + 0 ] ) & 0xfc;
+
+    int testPower = ((ECU32[(0x200 * 3) + (0x51 * 2)  ] & 0xffff ) );  // 04:51, actually means "unlocked"
+
     if ((testPower == 0) && (myPower > 0)) {
       myPower = 0;
 #ifdef ESPLED
@@ -603,11 +626,22 @@ void loop () {
 #endif
     }
 
+    //23:25==1?  screen on
+    if ((ECU32[(0x200 * 5) + (0x25 * 2)  ] & 0xffff ) == 1) {
+      myDrive = 1;
+    } else {
+      myDrive = 0;
+    }
+
+    if (myPower == 0) {
+      myDrive = 0;
+    }
+
     static int myTopSpd = 0;
     static int myTopDly = 0;
     if (mySpeed > myTopSpd) {
       myTopSpd = mySpeed;
-      myTopDly = 1000;
+      myTopDly = 333333;  // BUG make it millis() based
     }
     static int mySpeedAvg;
     mySpeedAvg *= 7;
@@ -618,17 +652,54 @@ void loop () {
       int c1 = 0;
       int c2 = 0;
       int c3 = 0;
-      if (mySpeed > (l * 10)) {
-        c1 = 255;
+
+      if (myBoost > (l * 25)) {
+        c1 = 15;
+        c2 = 7;
+        c3 = 1;
       }
       if (mySpeedAvg > (l * 10)) {
         c2 = 31;
         c3 = 3;
       }
+      if (mySpeed > (l * 10)) {
+        c1 = 255;
+      }
       if (myTopSpd > (l * 10)) {
         c3 = 31;
       }
       leds[l].setRGB(c2, c1, c3);
+    }
+    if (1) {
+      switch (myMode) {
+        case 1: //walk
+          leds[7].setRGB(0, 0, 32);
+          break;
+        case 2: //eco
+          if (myParm) {
+            leds[7].setRGB(1, 24, 8);
+          } else {
+            leds[7].setRGB(0, 26, 0);
+          }
+          break;
+        case 3: //sport
+          if (myParm) {
+            leds[7].setRGB(14, 18, 2);
+          } else {
+            leds[7].setRGB(26, 12, 0);
+          }
+          break;
+        case 4: //race
+          if (myParm) {
+            leds[7].setRGB(24, 1, 8);
+          } else {
+            leds[7].setRGB(34, 0, 0);
+          }
+          break;
+        default:
+          leds[7].setRGB(1, 1, 1);
+          break;
+      }
     }
 
     for (int l = 0; l < 8; l++) {
@@ -646,24 +717,43 @@ void loop () {
       leds[15 - l].setRGB(c2, c1, 0);
     }
 
+    // check for driving events
+    if (myTest & ! myBrake) {
+      //      if (flicker) {
+      if (flash) {
+        leds[8].setRGB(255, 0, 255);
+      } else {
+        leds[8].setRGB(0, 255, 0);
+      }
+      //      }
+    }
+    if (myBrake & flicker) {
+      leds[8].setRGB(255, 255, 255);
+    }
+
     if (ledDly) {
       ledDly--;
     } else {
-      ledDly = 300;
+      ledDly = 2000;
       ledBri++;
-      if (ledBri > 255) {
-        ledBri = 0;
+      while (ledBri > 255) {
+        ledBri -= 256;
       }
       ledcWrite (LGpin, table[ledBri]);
       if (myPower) {
         FastLED.show();
-      }
-      if (myTopDly) {
-        myTopDly--;
-      } else {
-        if (myTopSpd) {
-          myTopSpd--;
+        flicker = 1 - flicker;
+        if (flicker) {
+          flash = 1 - flash;
         }
+      }
+    }
+    if (myTopDly) {
+      myTopDly--;
+    } else {
+      myTopDly = 3000;
+      if (myTopSpd) {
+        myTopSpd--;
       }
     }
 #endif
