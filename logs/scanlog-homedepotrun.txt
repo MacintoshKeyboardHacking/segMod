@@ -1,0 +1,4 @@
+# scanlog-homedepotrun.bin was a quick trip to home depot, while actively sread-scanning the VCU and BMS. 
+
+hexdump -C scanlog-homedepotrun.bin |cut -d\  -f3-10,12-20|tr -d \\n|sed -e "s/5a a5\ /\\n5a a5 /g"
+
