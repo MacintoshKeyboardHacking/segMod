@@ -50,10 +50,10 @@ const byte VCU_FunDisplayBool5 = 0x33;
 
 const byte VCU_ActDate = 0x40;
 const byte VCU_StartSpeed = 0x42;
-const byte VCU_GearEDMin = 0x43;	// more 
-const byte VCU_GearSRMin = 0x44;	
-const byte VCU_GearEDMax = 0x45;
-const byte VCU_GearSRMax = 0x46;
+const byte VCU_GearEDMin = 0x43;	// ECO, DRIVE MIN 
+const byte VCU_GearSRMin = 0x44;	// SPORT, RACE MIN
+const byte VCU_GearEDMax = 0x45;  // MAX
+const byte VCU_GearSRMax = 0x46;  
 //const byte VCU_MaxSpeed = 0x46;
 const byte VCU_GearED = 0x47;
 const byte VCU_GearSR = 0x48;
@@ -98,13 +98,13 @@ const byte VCU_MaintainCode = 0x78;
 const byte VCU_EGear = 0x79;
 const byte VCU_DGear = 0x7A;
 
-const byte VCU_0xc0_0x0c = 0xc0;	// = MCU_CPUId (02:0xda)
-const byte VCU_0xc6_0x02 = 0xc6;
-const byte VCU_0xc7_0x06 = 0xc7;
+const byte VCU_MCUCPUId = 0xc0;	// = MCU_CPUId (02:0xda)
+const byte VCU_MCUFlag = 0xc6;
+const byte VCU_MCURand = 0xc7;
 const byte VCU_LIGHT = 0xd2;
 const byte VCU_CPUId = 0xDA;
-const byte VCU_0xe4_0x06 = 0xe4;
-const byte VCU_0xe7_0x02 = 0xe7;
+const byte VCU_RAND = 0xe4;
+const byte VCU_FLAG = 0xe7;
 const byte VCU_EncryptionFlag = 0xE8;
 
 
@@ -113,9 +113,22 @@ const byte BMS_ManufactureDateLT = 0x0A;
 const byte BMS_Ver = 0x0E;
 
 const byte BMS_SERIES_CELLS = 0x10;
-const byte BMS_RATED_VOLTAGE = 0x11;
+const byte BMS_RATED_VOLTAGE = 0x11;  // *10
+const byte BMS_0x12_0x02 = 0x12;  // # temps?, # parallel cells?
 
 const byte BMS_Capacity = 0x13;
+
+const byte BMS_CELL_THRESH_0 = 0x15;  //  3340        3474
+const byte BMS_CELL_THRESH_1 = 0x16;  //  3470  1.04  3568  1.028
+const byte BMS_CELL_THRESH_2 = 0x17;  //  3580  1.03  3615  1.013
+const byte BMS_CELL_THRESH_3 = 0x18;  //  3650  1.02  3648  1.01
+const byte BMS_CELL_THRESH_4 = 0x19;  //  3740  1.025 3698  1.014
+const byte BMS_CELL_THRESH_5 = 0x1a;  //  3830  1.025 3794  1.026
+const byte BMS_CELL_THRESH_6 = 0x1b;  //  3920  1.023 3885  1.024
+const byte BMS_CELL_THRESH_7 = 0x1c;  //  4030  1.03  3978  1.024
+const byte BMS_CELL_THRESH_8 = 0x1d;  //  4080  1.01  4080  1.026
+const byte BMS_CELL_THRESH_9 = 0x1e;  //  4180  1.025 4150  1.017
+
 
 const byte BMS_CycleCountLT = 0x59;
 const byte BMS_MAH_FACTORY = 0x5a;
@@ -136,7 +149,7 @@ const byte BMS_FULL_CAP_PCT = 0x8e;
 const byte BMS_CHARGE_PCT = 0x8f;
 
 const byte BMS_ChargeStatus = 0x92;
-const byte BMS_TimeFull = 0x94;
+const byte BMS_TimeFull = 0x94;     // charge minutes remaining
 //const byte BMS_CHARGE_TIME = 0x94;
 const byte BMS_Temps = 0x96;
 const byte BMS_CellVolts = 0xA0;
@@ -151,11 +164,14 @@ const byte BMS_ExtremeUseTimeLT = 0xF5;
 const byte BMS_ExtremeChargeTimeLT = 0xF7;
 const byte BMS_TEMP = 0xf9;
 
+// rMCUPN 	16 (0x10)
+
+const byte MCU_PN = 0x10;
 
 const byte MCU_TEMP = 0x3e;
 const byte MCU_TEMP_A_LASTMAX = 0x40;
 const byte MCU_TEMP_B_LASTMAX = 0x41;
-const byte MCU_TEMP_A = 0x48;
+const byte MCU_TEMP_A = 0x48;   // deg C * 10
 const byte MCU_TEMP_B = 0x49;
 
 const byte MCU_MODE = 0x83;
@@ -164,6 +180,9 @@ const byte MCU_VOLTS = 0x8f;
 
 const byte MCU_UNK_SIGNED_A = 0x91;
 const byte MCU_UNK_SIGNED_B = 0x92;
+
+const byte MCU_0xE1_0x06 = 0xe1;
+const byte MCU_0xE4_0x06 = 0xe4;
 
 
 const byte BLE_VERSION = 0x01;
