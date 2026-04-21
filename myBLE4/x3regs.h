@@ -1,4 +1,13 @@
-// special thanks https://codeberg.org/NootNooot for reversing the app registers!
+// special thanks https://codeberg.org/NootNooot for identifying the app registers!
+
+
+
+const byte ECU_BLE = 0x04;
+const byte ECU_BLE_POWER = 0x51;
+
+
+
+const byte ECU_TFT = 0x23;
 
 const byte CMD_READ = 0x01;
 const byte CMD_WRITE = 0x02;
@@ -204,8 +213,8 @@ const byte DIS_VCU_MESG = 0xd5;
 
 // 16bits
 const unsigned long SUB_7e765289 = 0x7e765289;
-const unsigned long SUB_MILEAGE = 0xddaa7a89;
-const unsigned long SUB_TRIP = 0xac440ac5;
+const unsigned long SUB_MILEAGE = 0xddaa7a89;   // max 3 digits
+const unsigned long SUB_TRIP = 0xac440ac5;      // 1 mile on GT3, .1 miles on G3/F3
 const unsigned long SUB_a3ddd1b3 = 0xa3ddd1b3;
 const unsigned long SUB_a3ddd1b2 = 0xa3ddd1b2;
 const unsigned long SUB_a3ddd1ad = 0xa3ddd1ad;
