@@ -23,6 +23,10 @@ unsigned long *ECUptr;                    // convenience pointer
 
 unsigned int bgECUaddr = 0;
 
+
+#define ECU_SUB 0x02  // re: ECUbank
+#define ECU_MOD 0x07  // re: ECUbank
+
 // BUG disabled below
 byte ecu_cmd_acl[] = { 0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -47,7 +51,7 @@ byte ecu_cmd_acl[] = { 0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x0
 //RTC_IRAM_ATTR static uint32_t rtcd;
 //__NOINIT_ATTR WORD_ALIGNED_ATTR static uint32_t temp[1024];
 
-__NOINIT_ATTR int powerStat;
+__NOINIT_ATTR int powerState;
 
 RTC_NOINIT_ATTR WORD_ALIGNED_ATTR byte RTCbuf[(0x200 * maxECU)];  // 4kB
 EXT_RAM_NOINIT_ATTR WORD_ALIGNED_ATTR uint32_t PSRbuf[(0x200 * maxECU)];
@@ -66,9 +70,18 @@ DRAM_ATTR const int IFBlen = (0x200 * maxIFB);
 byte *ifRX;
 byte *ifTX;
 
+//typedef DRAM_ATTR unsigned long u32;
+
+
 int ifRXlen[maxIFB] = { 0 };
 int ifTXlen[maxIFB] = { 0 };
 int ifErr[5] = { 0 };
+
+unsigned long timeTXecu[maxECU + 1] = { 0 };
+unsigned long timeRXecu[maxECU + 1] = { 0 };
+unsigned long timeTXifb[maxIFB + 1] = { 0 };
+unsigned long timeRXifb[maxIFB + 1] = { 0 };
+int timeTXdelay[maxECU + 1] = { 0 };
 
 int sniffDump = 0;
 
@@ -101,15 +114,6 @@ int tempad = 0;
 int tempac = 7;
 
 
-#define ECU_BMS 0x07
-#define ECU_BMS_CELLTEMPS 0x96
-#define ECU_BMS_CELLVOLTS 0xa0
-
-#define ECU_VCU 0x16
-#define ECU_MCU 0x02
-
-#define ECU_SUB 0x02
-#define ECU_MOD 0x07
 
 int subCount = 0;
 unsigned long subVar[50];  // technical limit of 50 variables in sub packet
@@ -230,7 +234,6 @@ CRGB leds[NUM_LEDS];
 void IRAM_ATTR doLog(const char *var) {
   if (doLogDst & 0x01) {
     webSerial.print(var);
-    //webSerial.printf("Hello, %s!", "World");
   }
   if (doLogDst & 0x02) {
     VCU.println(var);
@@ -425,7 +428,7 @@ void setup() {
   diagLED(-1);
 
   initECU();
-  powerStat = ECUbuf[(ECUbank(ECU_BLE) * 0x200 * 4) + (ECU_BLE_POWER * 2 * 4)] == 1;
+  powerState = ECUbuf[(ECUbank(ECU_BLE) * 0x200 * 4) + (BLE_Power * 2 * 4)] == 1;
 
   // initialize IFB buffers
   ifRX = (byte *)malloc(IFBlen);
@@ -532,7 +535,7 @@ IRAM_ATTR byte ECUbank(const int ECUid) {
       return {
         0x04
       };
-    case 0x23:
+    case ECU_TFT:
       return {
         0x05
       };
@@ -748,7 +751,6 @@ int doRXpkt(const int ifb) {
 void doRXdecode() {
   byte *tmp = (byte *)TXpkt;
 
-  //doLog(("command " + String(tmp[5], HEX)).c_str());
   int addr = 0;
   unsigned long tmpVar = 0;
   unsigned long newFlags = 0;
@@ -756,21 +758,21 @@ void doRXdecode() {
   switch (tmp[5]) {
     case CMD_READ:
       {
-        //doLog(("readC " + String(ECUbank(tmp[3]), HEX) + ":" + String(tmp[6], HEX)).c_str());
-        //newFlags |= ECU_read;
+        // an opportunity to return false data
         break;
       }
     case CMD_WRITE:
     case CMD_WRITE_NR:
       {
-        //doLog(("write " + String(ECUbank(tmp[4]), HEX) + ":" + String(tmp[6], HEX)).c_str());
+        // maybe not the best... time calibration
         if ((tmp[4] == 0x23) & (tmp[6] == 0x3d)) {
           doLog(("calTime " + String(timeNow - calLast) + " " + String(timeNow) + " " + String(tmp[7], HEX) + " " + String(tmp[8], HEX) + " " + String(tmp[9], HEX) + " " + String(tmp[0x0a], HEX) + " " + String(tmp[0x0b], HEX) + " " + String(tmp[0x0c], HEX)).c_str());
           calLast = timeNow;
         }
+
         addr = ECUbank(tmp[4]) * 0x200;
         if ((tmp[4] == 0x23) & (tmp[6] == 0xfe)) {
-          addr = 0x304;  // kludge, receive at ecu bank 2, 0x80
+          addr = 0x304;  // kludge, receive subscription parameters at ecu bank 2
           break;
         }
         if ((tmp[4] == ECU_VCU) & (tmp[6] == 0xfd)) {
@@ -813,13 +815,24 @@ void doRXdecode() {
 }
 
 void IRAM_ATTR pktXmitBuf(const int mask) {
+  //timeTXecu[0]=timeNow;
+
+  //timeTXifb[0]=timeNow;
+  //if timeTXdelay[(*TXpktDst)]
+
   if (mask & 0x01) {
     Serial.write(TXpkt, (*TXpktLen + 9));
+    //timeTX(0)=timeNow;
+    //timeTX(1)=timeNow;
   }
   if (mask & 0x02) {
+    //timeTX(0)=timeNow;
+    //timeTX(2)=timeNow;
     VCU.write(TXpkt, (*TXpktLen + 9));
   }
   if (mask & 0x04) {
+    //timeTX(0)=timeNow;
+    //timeTX(3)=timeNow;
     BLE.write(TXpkt, (*TXpktLen + 9));
   }
   if (mask & 0x08) {
@@ -856,14 +869,10 @@ void IRAM_ATTR pktXmitCmd(const int mask, const byte pktDat[]) {
     TXyes++;
     ECUbuf[(0x200 * ECU_MOD * 4) + (0x0c * 4 * 2)] = (TXyes & 0xff);
     ECUbuf[(0x200 * ECU_MOD * 4) + (0x0c * 4 * 2) + 0x04] = (TXyes >> 8) & 0xff;
-    // ECUbuf[(0x200 * 7 * 4) + (0x0c * 4 * 2) + 0x08] = (TXyes >> 16) & 0xff;
-    // ECUbuf[(0x200 * 7 * 4) + (0x0c * 4 * 2) + 0x0c] = (TXyes >> 24) & 0xff;
   } else {
     TXno++;
     ECUbuf[(0x200 * ECU_MOD * 4) + (0x0d * 4 * 2)] = (TXno & 0xff);
     ECUbuf[(0x200 * ECU_MOD * 4) + (0x0d * 4 * 2) + 0x04] = (TXno >> 8) & 0xff;
-    // ECUbuf[(0x200 * 7 * 4) + (0x0d * 4 * 2) + 0x08] = (TXno >> 16) & 0xff;
-    // ECUbuf[(0x200 * 7 * 4) + (0x0d * 4 * 2) + 0x0c] = (TXno >> 24) & 0xff;
   }
 }
 
@@ -871,7 +880,7 @@ void IRAM_ATTR pktXmitCmd(const int mask, const byte pktDat[]) {
 void IRAM_ATTR pktSend(const int mask) {
   int TXparity = 0;
   int tmp = 0;
-  for (; tmp < (TXpktBuf[0] + 5); tmp++) {
+  for (; tmp < (*TXpktLen + 5); tmp++) {
     TXparity += TXpktBuf[tmp];
   }
   TXparity &= 0xffff;
@@ -910,7 +919,7 @@ unsigned long getStatVars() {
   static int battT = 0;
 
   volts = 0;
-  int addr = (ECUbank(ECU_BMS) * 0x200) + (ECU_BMS_CELLVOLTS * 2);
+  int addr = (ECUbank(ECU_BMS) * 0x200) + (BMS_CellVolts * 2);
   for (int i = 0; i < battCells; i++) {
     volts += ECU32buf[addr + (i * 2)] & 0xff;
     volts += (ECU32buf[addr + (i * 2) + 1] & 0xff) << 8;
@@ -920,7 +929,7 @@ unsigned long getStatVars() {
   TXpktBuf[1] = MY_ECU;
   TXpktBuf[2] = ECU_BMS;
   TXpktBuf[3] = CMD_READ;
-  TXpktBuf[4] = (ECU_BMS_CELLVOLTS + battC);
+  TXpktBuf[4] = (BMS_CellVolts + battC);
   TXpktBuf[5] = 0x02;
   TXpktBuf[6] = 0x00;
   pktSend(0x0e);
@@ -930,10 +939,16 @@ unsigned long getStatVars() {
     battC -= battCells;
   }
 
+  // get the temps
+  TXpktBuf[2] = ECU_MCU;
+  TXpktBuf[4] = (BMS_CellVolts + battC);
+  TXpktBuf[5] = 0x04;
+
+
   temps = 0;
   int count = 0;
 
-  addr = (ECUbank(ECU_BMS) * 0x200) + (ECU_BMS_CELLTEMPS * 2);
+  addr = (ECUbank(ECU_BMS) * 0x200) + (BMS_CellTemps * 2);
   for (int i = 0; i < battTemps; i++) {
     if ((ECU32buf[addr + (i * 2)] & 0xff) != 0xff) {
       temps += ECU32buf[addr + (i * 2)] & 0xff;
@@ -955,7 +970,10 @@ void poop() {
   rxBytes = VCU.readBytes(RXbuf, rxBS);
   if (rxBytes) { BLE.write(RXbuf, rxBytes); }
 }
-
+/*
+lastRX(maxIFB);
+lastTX(maxIFB);
+*/
 
 void loop() {
   static int ecuPhase = 0;
@@ -998,18 +1016,26 @@ void loop() {
     if (doRX(ifbPhase)) {
       while (doRXpkt(ifbPhase)) {
         doRXdecode();
+
+        // not a good implementation
         if (TXpktBuf[4] == 0xfe) {
 
           temper++;
           if (temper > 0xff) { temper -= 0x100; }
           //TXpktBuf[0x0a]=ECUbuf[(0x200 * ECU_BMS * 4)+(0x8d * 4 * 2)];
           //TXpktBuf[0x0b]=ECUbuf[(0x200 * ECU_BMS * 4)+(0x8d * 4 * 2)+4];
-          int oVolts = (volts - 5) / 10;
+          static int lastVolts = 0;
+          lastVolts *= 3;
+          lastVolts += volts;
+          if (lastVolts) {
+            lastVolts -= 2;
+            lastVolts /= 4;
+          }
+          int oVolts = (lastVolts - 5) / 10;
           //TXpktBuf[0x08] = oVolts&0xff;  // debug volts in ODO
           //TXpktBuf[0x09] = (oVolts>>8)&0xff;
-
-          TXpktBuf[0x0a] = oVolts & 0xff;  // debug volts in ODO
-          TXpktBuf[0x0b] = (oVolts >> 8) & 0xff;
+          TXpktBuf[0x08] = oVolts & 0xff;  // debug volts in ODO
+          TXpktBuf[0x09] = (oVolts >> 8) & 0xff;
           subSet();
         }
         //TXpktBuf[10]=
@@ -1038,16 +1064,16 @@ void loop() {
       }
     }
 
-    powerStat = ECUbuf[(ECUbank(ECU_BLE) * 0x200 * 4) + (ECU_BLE_POWER * 2 * 4)] == 1;
+    powerState = ECUbuf[(ECUbank(ECU_BLE) * 0x200 * 4) + (BLE_Power * 2 * 4)] == 1;
 
     if (tickMid) {
       tickMid = 0;
 
-      live.send(String(subGet(SUB_SPEED)).c_str(), "speed", millis());
-      live.send(String(volts).c_str(), "volts", millis());
-      live.send(String(temps).c_str(), "temp", millis());
+      live.send(String(subGet(SUB_Speed)).c_str(), "speed", timeNow);
+      live.send(String(volts).c_str(), "volts", timeNow);
+      live.send(String(temps).c_str(), "temp", timeNow);
 
-      if (powerStat) {
+      if (powerState) {
         unsigned long getBatt = getStatVars();
 
         if (fullRead) {
@@ -1059,17 +1085,15 @@ void loop() {
 
 
           static byte xread[] = { 0x02, MY_ECU, 0x16, 0x01, 0x00, 0x10, 0x00 };
-          //*TXpktBuf=*xread;
-          //TXpktBuf[1]=0xff;
-          TXpktBuf[0] = 0x02;
-          TXpktBuf[1] = MY_ECU;
-          if (scanECU == 0) { TXpktBuf[2] = ECU_VCU; }
-          if (scanECU == 1) { TXpktBuf[2] = ECU_BMS; }
-          if (scanECU == 2) { TXpktBuf[2] = ECU_MCU; }
-          if (scanECU == 3) { TXpktBuf[2] = ECU_BLE; }
+          *TXpktLen = 0x02;
+          *TXpktSrc = MY_ECU;
+          if (scanECU == 0) { *TXpktDst = ECU_VCU; }
+          if (scanECU == 1) { *TXpktDst = ECU_BMS; }
+          if (scanECU == 2) { *TXpktDst = ECU_MCU; }
+          if (scanECU == 3) { *TXpktDst = ECU_BLE; }
           //if (scanECU == 4) { TXpktBuf[2] = 0x23; } // ECU not respond
-          TXpktBuf[3] = 0x01;
-          TXpktBuf[4] = scanAddr;
+          *TXpktCmd = 0x01;
+          *TXpktArg = scanAddr;
           TXpktBuf[5] = 0x08;  // was 0x10
           TXpktBuf[6] = 0x00;
           pktSend(0x0e);
@@ -1085,14 +1109,14 @@ void loop() {
             }
           }
         }
-        ECUbuf[(0x200 * 7 * 4)]++;  // metrics: mid ticks
+        ECUbuf[(0x200 * ECU_MOD * 4)]++;  // metrics: mid ticks
       }
       PSRbackup();
     }
 
     if (tickSlow) {
       tickSlow = 0;
-      ECUbuf[(0x200 * 7 * 4) + 4]++;
+      ECUbuf[(0x200 * ECU_MOD * 4) + 4]++;
       RTCbackup();
     }
 
