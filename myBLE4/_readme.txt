@@ -102,3 +102,9 @@ install and demo video coming eventually,
 https://www.youtube.com/@MacintoshKeyboardHacking/streams
 
 enjoy!
+
+
+--------------------
+changelog:
+
+add "display cell volts as trip odo" hack
