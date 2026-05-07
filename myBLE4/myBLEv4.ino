@@ -83,7 +83,7 @@ unsigned long timeTXifb[maxIFB + 1] = { 0 };
 unsigned long timeRXifb[maxIFB + 1] = { 0 };
 int timeTXdelay[maxECU + 1] = { 0 };
 
-int sniffDump = 0;
+int sniffDump = 0;  // debug print packet hex to console
 
 // convenience pointer
 byte *RXptr;
@@ -106,6 +106,8 @@ const byte xHB2[] = { 0x00, 0x23, 0x16, 0x7b, 0x02 };
 const byte xTurnOn[] = { 0x02, MY_ECU, 0x16, 0x79, 0x00, 0x01, 0x00 };
 const byte xTurnOff[] = { 0x02, MY_ECU, 0x16, 0x79, 0x00, 0x02, 0x00 };
 const byte xDeepSleep[] = { 0x02, MY_ECU, 0x07, 0x7a, 0x00, 0x00, 0x01 };
+
+const byte xTirePressure[] = { 0x00, MY_ECU, 0x16, 0x11, 0x01 };
 
 
 int fullRead = 1;
@@ -197,6 +199,7 @@ int diagLEDs = 1;
 // system stuffs
 __NOINIT_ATTR int formatting;
 int rebooting = 0;
+int recovery = 0;
 int doLogDst = 1;  // bitmask of log destinations
 
 unsigned long timeOld = 0;
@@ -261,47 +264,50 @@ void IRAM_ATTR diagLED(const int tmp) {
   }
 
 #ifdef ESPLED
-  switch (diagLEDc) {
-    case 0:
-      {
-        leds[0].setRGB(0, 0, 0);
-        break;
-      }  // off
-    case 1:
-      {
-        leds[0].setRGB(0, 0, 4);
-        break;
-      }  // blue
-    case 2:
-      {
-        leds[0].setRGB(0, 3, 2);
-        break;
-      }  // purple
-    case 3:
-      {
-        leds[0].setRGB(0, 5, 0);
-        break;
-      }  // red
-    case 4:
-      {
-        leds[0].setRGB(1, 3, 0);
-        break;
-      }  // yellow
-    case 5:
-      {
-        leds[0].setRGB(2, 0, 0);
-        break;
-      }  // green
-    case 6:
-      {
-        leds[0].setRGB(1, 0, 2);
-        break;
-      }  // cyan
-    case 7:
-      {
-        leds[0].setRGB(2, 3, 2);
-        break;
-      }  // white
+  if (diagLEDc) {
+    if (recovery) {
+      leds[0].setRGB(2, 3, 2);
+    } else {
+      switch (diagLEDc) {
+        case 1:
+          {
+            leds[0].setRGB(0, 0, 4);
+            break;
+          }  // blue
+        case 2:
+          {
+            leds[0].setRGB(0, 3, 2);
+            break;
+          }  // purple
+        case 3:
+          {
+            leds[0].setRGB(0, 5, 0);
+            break;
+          }  // red
+        case 4:
+          {
+            leds[0].setRGB(1, 3, 0);
+            break;
+          }  // yellow
+        case 5:
+          {
+            leds[0].setRGB(2, 0, 0);
+            break;
+          }  // green
+        case 6:
+          {
+            leds[0].setRGB(1, 0, 2);
+            break;
+          }  // cyan
+        case 7:
+          {
+            leds[0].setRGB(2, 3, 2);
+            break;
+          }  // white
+      }
+    }
+  } else {
+    leds[0].setRGB(0, 0, 0);
   }
   FastLED.show();
 #endif
@@ -382,15 +388,25 @@ bool IRAM_ATTR PSRrestore() {
   }
 }
 
+void ARDUINO_ISR_ATTR setRecovery() {
+  recovery = 1;
+  sniffDump = 1;  //deBUG
+}
+
 
 void setup() {
   setCpuFrequencyMhz(80);
   doLog("INIT");
+
+  int buttonPin = 0;  // boot pin
+  pinMode(buttonPin, INPUT_PULLUP);
+  attachInterrupt(buttonPin, setRecovery, FALLING);
+
 #ifdef ESPLED
   FastLED.addLeds<WS2812, 21, GRB>(leds, NUM_LEDS);
   FastLED.clear();
 #endif
-  diagLED(1);
+  diagLED(7);
 
   Serial.setTimeout(0);
   Serial.begin(115200);
@@ -403,7 +419,6 @@ void setup() {
 
   while (!VCU || !BLE) { ; }
   doLog("SETUP");
-  diagLED(7);
 
   if (!SPIFFS.begin(false)) {
     doLog("spiffs fail");
@@ -414,8 +429,8 @@ void setup() {
     doLog("format");
     if (SPIFFS.format()) {
       formatting = 0;
-      diagLED[0];
     }
+    diagLED(0);
     ESP.restart();
   }
   diagLED(-1);
@@ -428,16 +443,31 @@ void setup() {
   diagLED(-1);
 
   initECU();
-  powerState = ECUbuf[(ECUbank(ECU_BLE) * 0x200 * 4) + (BLE_Power * 2 * 4)] == 1;
+  powerState = ECUbuf[(ECUbank(ECU_BLE) * 0x200 * 4) + (BLE_Power * 2 * 4)] != 0;
 
   // initialize IFB buffers
   ifRX = (byte *)malloc(IFBlen);
   ifTX = (byte *)malloc(IFBlen);
 
-  diagLED(0);
   protoInit();
 
   doLog("READY");
+  diagLED(7);
+  while (recovery) {
+    static int rxBytes = 0;
+    rxBytes = BLE.readBytes(RXbuf, rxBS);
+    if (rxBytes) {
+      VCU.write(RXbuf, rxBytes);
+    }
+
+    rxBytes = VCU.readBytes(RXbuf, rxBS);
+    if (rxBytes) {
+      BLE.write(RXbuf, rxBytes);
+    }
+    yield();
+  }
+  diagLED(0);
+
   delay(1000);
   timeOld = micros();
 }
@@ -481,6 +511,7 @@ IRAM_ATTR void subSet() {
         oByte++;
       }
     }
+
     //doLog(("settt " + String(subID) + " " + String(sVal, HEX)).c_str());
     //subVal[subID] = sVal;  // BUG
     subVal[subID] = (sVal >> 8) + ((sVal & 0xff) << 8);
@@ -742,7 +773,7 @@ int doRXpkt(const int ifb) {
 }
 
 /*
-211 5a a5 02 16 23 03 60 00 00 61 ff
+    211 5a a5 02 16 23 03 60 00 00 61 ff
     127 5a a5 02 16 23 03 60 01 00 60 ff
      85 5a a5 02 16 23 03 60 02 00 5f ff
       3 5a a5 06 16 23 03 3d 00 00 14 0c 2f 17 1a ff clock
@@ -844,7 +875,9 @@ void IRAM_ATTR pktXmitBuf(const int mask) {
       myStat += String(val, HEX);
     }
     if (sniffDump) {
-      doLog(myStat.c_str());
+      if ((*TXpktSrc != 0x23) & (*TXpktDst != 0x23)) {
+        doLog(myStat.c_str());
+      }
     }
   }
 }
@@ -905,14 +938,14 @@ void IRAM_ATTR pktSend(const int mask) {
 
 void protoInit() {
   int mask = 0x0e;
-  pktXmitCmd(mask, xMOD);
+  pktXmitCmd(mask, xMOD);  // identify
   pktXmitCmd(mask, xALS0);
+  pktXmitCmd(mask, xTirePressure);  // resets maintenance reminders
   subMap();
 }
 
 unsigned long getStatVars() {
-  //const int battCells = 0x14;  // BUG: read from BMS instead
-  int battCells = ECUbuf[(ECUbank(ECU_BMS) * 0x200 * 4) + (BMS_SERIES_CELLS * 2 * 4)];  // BUG: read from BMS instead
+  int battCells = ECUbuf[(ECUbank(ECU_BMS) * 0x200 * 4) + (BMS_SERIES_CELLS * 2 * 4)];  // BUG: move to init
   const int battTemps = 0x08;                                                           // BUG: read from BMS
 
   static int battC = 0;
@@ -1031,10 +1064,9 @@ void loop() {
             lastVolts -= 2;
             lastVolts /= 4;
           }
-          int oVolts = (lastVolts - 5) / 10;
-          //TXpktBuf[0x08] = oVolts&0xff;  // debug volts in ODO
-          //TXpktBuf[0x09] = (oVolts>>8)&0xff;
-          TXpktBuf[0x08] = oVolts & 0xff;  // debug volts in ODO
+          //          int oVolts = (lastVolts - 5) / 10;
+          int oVolts = (lastVolts - 50) / 100;  // looks great on F3, no decimal on GT3
+          TXpktBuf[0x08] = oVolts & 0xff;       // debug volts in remaining range
           TXpktBuf[0x09] = (oVolts >> 8) & 0xff;
           subSet();
         }
@@ -1074,16 +1106,16 @@ void loop() {
       live.send(String(temps).c_str(), "temp", timeNow);
 
       if (powerState) {
-        unsigned long getBatt = getStatVars();
-
-        if (fullRead) {
+        unsigned long getBatt = -1;
+        if ((!recovery) & (!fullRead)) {
+          getBatt = getStatVars();
           //unsigned long getBatt=battStat();
           ECUbuf[(0x200 * 7 * 4) + (0x08 * 4)] = getBatt & 0xff;
           ECUbuf[(0x200 * 7 * 4) + (0x09 * 4)] = (getBatt >> 8) & 0xff;
           ECUbuf[(0x200 * 7 * 4) + (0x0a * 4)] = (getBatt >> 16) & 0xff;
           ECUbuf[(0x200 * 7 * 4) + (0x0b * 4)] = (getBatt >> 24) & 0xff;
-
-
+        }
+        if (fullRead) {
           static byte xread[] = { 0x02, MY_ECU, 0x16, 0x01, 0x00, 0x10, 0x00 };
           *TXpktLen = 0x02;
           *TXpktSrc = MY_ECU;
@@ -1094,14 +1126,14 @@ void loop() {
           //if (scanECU == 4) { TXpktBuf[2] = 0x23; } // ECU not respond
           *TXpktCmd = 0x01;
           *TXpktArg = scanAddr;
-          TXpktBuf[5] = 0x08;  // was 0x10
+          TXpktBuf[5] = 0x08;  // 0x08 for BMS, others are 0x10 capable
           TXpktBuf[6] = 0x00;
           pktSend(0x0e);
 
           scanECU += 1;
           if (scanECU > 3) {
             scanECU = 0;
-            scanAddr += 0x04;  // was 0x08
+            scanAddr += 0x04;  // 0x04 for BMS, others can skip by 0x08
             scanAddr &= 0xff;
             if (!scanAddr) {
               fullRead--;
@@ -1150,6 +1182,7 @@ void loop() {
       PSRbackup();
       RTCbackup();
       delay(500);
+      diagLED(0);
       ESP.restart();
     }
 
@@ -1193,6 +1226,23 @@ void wifiConnect() {
   }
 }
 
+int hexChar(char c) {
+  if (c >= '0' && c <= '9') return c - '0';
+  if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+  if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+  return 0;
+}
+
+char hexByte(char *h) {
+  char b = 0;
+  b += hexChar(*h++);
+  if (*h != '\0') {
+    b = b * 16 + hexChar(*h);
+  }
+  return b;
+}
+
+
 void updateFlash(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
   if (!index) {
     Update.begin((ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000);
@@ -1229,7 +1279,8 @@ String varProc(const String &var) {
 }
 
 void notFound(AsyncWebServerRequest *request) {
-  request->send(404, "text/plain", "404 badURL\n");
+  //request->send(404, "text/plain", "404 badURL\n");
+  request->redirect("/");
 }
 
 void setupAsyncServer() {
@@ -1346,6 +1397,23 @@ void setupAsyncServer() {
 
   server.on("/bms/volt", HTTP_GET, [](AsyncWebServerRequest *request) {
     request->send_P(200, "text/plain", String(getStatVars()).c_str());
+  });
+
+  server.on("/tx", HTTP_GET, [](AsyncWebServerRequest *request) {
+    char urlBuf[0x200];
+    request->url().toCharArray(urlBuf, 0x200);
+    int urlLen = request->url().length();
+
+    int p = 0;
+    for (int i = 4; i < urlLen; i += 2) {
+      //doLog(String(hexByte(&urlBuf[i])).c_str());
+      p++;
+      TXpktBuf[p] = hexByte(&urlBuf[i]);
+    }
+    TXpktBuf[0] = (p - 4);
+    pktSend(0x0e);
+
+    request->send(200, "text/plain", String(urlBuf));
   });
 
   server.on(

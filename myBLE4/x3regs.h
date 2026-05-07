@@ -15,7 +15,6 @@ const byte CMD_IAP_CRC = 0x09;    // 4 bytes download data checksum, with reply 
 const byte CMD_IAP_RESET = 0x0A;  // Chip reset instructon, without reply from scooter
 const byte CMD_IAP_ACK = 0x0B;    // Response frame of firmware download
 
-const byte CMD_ACTIVATE = 0x57;
 // Handshake
 const byte CMD_PRE_COMM = 0x5B;
 const byte CMD_SET_PWD = 0x5C;
@@ -27,6 +26,21 @@ const byte CMD_AUDIO_CRC = 0x78;    // Verify audio CRC
 
 
 const byte ECU_VCU = 0x16;
+
+const byte CMD_VCU_setTirePressureKnown = 0x11;    // setTirePressureKnown 0x11 0x01
+const byte CMD_VCU_setMaintainCode = 0x11;    // setTirePressureKnown 0x11 0x02
+const byte CMD_VCU_wSN = 0x18; // 0x10
+
+const byte CMD_VCU_active = 0x57; // 0x00
+const byte CMD_VCU_wMileage = 0x5f; // 0x00
+
+const byte CMD_VCU_fileInfo = 0x76; // 0x00
+const byte CMD_VCU_fileWrite = 0x77; // 0x00
+const byte CMD_VCU_fileCRC = 0x78; // 0x01
+const byte CMD_VCU_openAccTimeout = 0x79; // 0x79 0x00
+const byte CMD_VCU_openAcc = 0x79; // len=1
+const byte CMD_VCU_closeAcc = 0x79; // len=2;
+
 const byte VCU_SN = 0x10;  // len 0x0e
 const byte VCU_CtrlV = 0x17;
 const byte VCU_MCUV = 0x18;
@@ -99,16 +113,17 @@ const byte VCU_TailLightMode = 0x5D;  // brake_flash
 const byte VCU_PreciseMileage = 0x5E;
 const byte VCU_LeftMileage = 0x5F;  // 4 byte
 
-const byte VCU_Pwd = 0x61;  // comboLock
-const byte VCU_Mileage = 0x62;
+const byte VCU_Pwd = 0x61;  // codeLock
+const byte VCU_Mileage = 0x62;  // .1 km
 const byte VCU_Runtime = 0x64;
 const byte VCU_RideTime = 0x66;
-const byte VCU_SingleMileage = 0x68;
+const byte VCU_SingleMileage = 0x68;  // .1 km
 const byte VCU_RunningTime = 0x69;
 const byte VCU_SingleRideTime = 0x6A;
 const byte VCU_BodyTemp = 0x6B;  // deg c*10
-const byte VCU_Temp = 0x6b;      // c*10
-const byte VCU_SGear = 0x6E;
+const byte VCU_Temp = 0x6b;      // deg c*10
+const byte VCU_someTemp = 0x6d; // ?? deg c
+const byte VCU_SGear = 0x6E;    // ??
 
 const byte VCU_DecMode = 0x70;  // VCU_KERS ?
 const byte VCU_KeyPwd = 0x71;
@@ -135,6 +150,11 @@ const byte VCU_EncryptionFlag = 0xE8;
 // VCU 0xfa
 
 const byte ECU_BMS = 0x07;
+const byte ECU_CMD_wSysTime = 0x2b; // 0x10
+const byte ECU_CMD_setBrownOut = 0x7a; // 0x00
+
+
+
 const byte BMS_BatterySN = 0x02;  // len 0x0e
 const byte BMS_ManufactureDate = 0x0A;
 const byte BMS_Ver = 0x0E;
@@ -221,6 +241,27 @@ const byte MCU_Rand2 = 0xe4;  // why 2?
 const byte MCU_0xE7_0x02 = 0xe7;
 
 const byte ECU_BLE = 0x04;
+
+// cmd 6f
+const byte CMD_BLE = 0x6f;
+const byte CMD_BLE_getInfo = 0x01;  // cmd 6f
+const byte CMD_BLE_unlockEnable = 0x02;
+const byte CMD_BLE_rssiCali = 0x03;
+const byte CMD_BLE_rssiSet = 0x04;
+const byte CMD_BLE_rssiGet = 0x05;
+const byte CMD_BLE_setConnectMode = 0x0c;
+const byte CMD_BLE_getConnectMode = 0x0d;
+const byte CMD_BLE_mediaEnable = 0x10;
+const byte CMD_BLE_rFindMyPairBroadcast = 0x22;
+const byte CMD_BLE_rFindMyBondStatus = 0x21;
+const byte CMD_BLE_rFindMyLocationStatus = 0x24;
+const byte CMD_BLE_rUUID = 0x25;
+const byte CMD_BLE_setUUID = 0x26;
+const byte CMD_BLE_rPPID = 0x27;
+
+const byte CMD_BLE_clearAllKeys = 0x80;
+
+
 const byte ECU_BLE_POWER = 0x51;
 
 const byte BLE_Version = 0x01;
@@ -240,6 +281,16 @@ const byte BLE_openFindMyPairBroadcast = 0x3a;
 
 
 const byte ECU_TFT = 0x23;
+const byte CMD_TFT = 0x71;
+const byte CMD_TFT_setNaviStart = 0x00; // 0x71
+const byte CMD_TFT_setNaviDistance = 0x01; // 0x71
+const byte CMD_TFT_setNaviInfo = 0x03; // 0x71
+const byte CMD_TFT_setNaviRoad = 0x10; // 0x71
+const byte CMD_TFT_setNaviRoadNext = 0x24; // 0x71
+const byte CMD_TFT_setNaviText = 0x38; // 0x71
+const byte CMD_TFT_setNaviExit = 0xff; // 0x71
+
+
 const byte TFT_Version = 0x01;
 const byte TFT_0x24_0x02 = 0x24;
 const byte TFT_ShowPage = 0x25;

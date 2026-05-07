@@ -15,6 +15,7 @@ various URLs are available:
 /clear		- clear entire map
 /log		- console output page
 /admin		- firmware updates
+/tx/3e0701b81000 - adds packet structure and sends supplied hex (in this example, read 16 bytes from the BMS starting at register 0xb8)
 
 
 still to come: automatic parsing of
