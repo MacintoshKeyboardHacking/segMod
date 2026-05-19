@@ -18,6 +18,10 @@ various URLs are available:
 /tx/3e0701b81000 - adds packet structure and sends supplied hex (in this example, read 16 bytes from the BMS starting at register 0xb8)
 
 
+note: recovery/safe mode is still sometimes needed!  gremlins persist, if having problems with firmware operations tap the gpio0 button immediately after module reset; LED will be solid white.
+
+
+
 still to come: automatic parsing of
 	voltages and temperatures from the cells
 	realtime energy consumption
@@ -109,3 +113,5 @@ enjoy!
 changelog:
 
 add "display cell volts as trip odo" hack
+added autoTune experiment - adjust KERS as drive mode changes
+

@@ -109,6 +109,13 @@ const byte xDeepSleep[] = { 0x02, MY_ECU, 0x07, 0x7a, 0x00, 0x00, 0x01 };
 
 const byte xTirePressure[] = { 0x00, MY_ECU, 0x16, 0x11, 0x01 };
 
+const byte xK0[] = { 0x00, MY_ECU, 0x16, 0x03, 0x70, 0x00, 0x00 };
+const byte xK1[] = { 0x00, MY_ECU, 0x16, 0x03, 0x70, 0x01, 0x00 };
+const byte xK2[] = { 0x00, MY_ECU, 0x16, 0x03, 0x70, 0x02, 0x00 };
+
+//const byte xK1[] = { 0x00, MY_ECU, ECU_VCU, CMD_WRITE_NR, VCU_DecMode, 0x01, 0x00 };
+//const byte xK0[] = { 0x00, MY_ECU, ECU_VCU, CMD_WRITE_NR, VCU_DecMode, 0x00, 0x00 };
+
 
 int fullRead = 1;
 int temper = 0;
@@ -417,7 +424,9 @@ void setup() {
   BLE.setTimeout(0);
   BLE.begin(115200, SERIAL_8N1, RXD2, TXD2);
 
-  while (!VCU || !BLE) { ; }
+  while (!VCU || !BLE) {
+    ;
+  }
   doLog("SETUP");
 
   if (!SPIFFS.begin(false)) {
@@ -488,7 +497,7 @@ void subMap() {
   }
 }
 
-// deconstruct VCU>BLE (0xfe) realtime report into individual u16s.
+// deconstruct VCU>TFT (0xfe) realtime report into separate u16s.
 IRAM_ATTR void subSet() {
   int subSetAdr = ((0x200 * ECU_SUB) + (0x80 * 2) + 1);
   int subID = 0;
@@ -513,8 +522,9 @@ IRAM_ATTR void subSet() {
     }
 
     //doLog(("settt " + String(subID) + " " + String(sVal, HEX)).c_str());
-    //subVal[subID] = sVal;  // BUG
-    subVal[subID] = (sVal >> 8) + ((sVal & 0xff) << 8);
+    subVal[subID] = sVal;
+    //subVal[subID] = (sVal >> 8) + ((sVal & 0xff) << 8); // unBUG?
+
     if (subLen[subID] < 0x10) {
       ECU32buf[(0x200 * ECU_SUB) + (0xc0 * 2) + (subID * 2)] = sVal & 0xff;
       ECU32buf[(0x200 * ECU_SUB) + (0xc0 * 2) + (subID * 2) + 1] = 0x00;
@@ -587,7 +597,9 @@ IRAM_ATTR int read16(const byte ECU, const byte ADR) {
 
 IRAM_ATTR int read16sign(const byte ECU, const byte ADR) {
   int tmp = ((ECU32buf[(0x200 * ECUbank(ECU)) + (ADR * 2)] & 0xff) + ((ECU32buf[(0x200 * ECUbank(ECU)) + (ADR * 2) + 4] & 0xff) << 8));
-  if (tmp > 0x7fff) { tmp -= 0x10000; }
+  if (tmp > 0x7fff) {
+    tmp -= 0x10000;
+  }
   return (tmp);
 }
 
@@ -608,7 +620,7 @@ void initECU() {
     RTCrestore();
   };
 }
-/* 
+/*
   void doCmdPkt(const int ifb) {
   switch (*TXpktCmd) {
     case 0:         // debug
@@ -802,12 +814,13 @@ void doRXdecode() {
         }
 
         addr = ECUbank(tmp[4]) * 0x200;
-        if ((tmp[4] == 0x23) & (tmp[6] == 0xfe)) {
-          addr = 0x304;  // kludge, receive subscription parameters at ecu bank 2
-          break;
-        }
+
         if ((tmp[4] == ECU_VCU) & (tmp[6] == 0xfd)) {
           addr += 6;  // kludge, receive at ecu bank 2, 0x00
+          break;
+        }
+        if ((tmp[4] == ECU_TFT) & (tmp[6] == 0xfe)) {
+          addr = 0x304;  // kludge, receive subscription parameters at ecu bank 2
           break;
         }
 
@@ -817,8 +830,9 @@ void doRXdecode() {
     case CMD_READ_RESP:
       {
         //doLog(("readR " + String(ECUbank(tmp[3]), HEX) + ":" + String(tmp[6], HEX)).c_str());
-        if ((tmp[6] == 0xfc)) { break; }
-        //if ((tmp[4] == 0x23) & (tmp[6] == 0xfc)) { break; }
+        if ((tmp[4] == 0x23) & (tmp[6] == 0xfc)) {
+          break;
+        }
 
         addr = ECUbank(tmp[3]) * 0x200;
         if (tmp[4] != MY_ECU) {
@@ -995,17 +1009,9 @@ unsigned long getStatVars() {
   return (volts);
 }
 
-void poop() {
-  static int rxBytes = 0;
-  rxBytes = BLE.readBytes(RXbuf, rxBS);
-  if (rxBytes) { VCU.write(RXbuf, rxBytes); }
-
-  rxBytes = VCU.readBytes(RXbuf, rxBS);
-  if (rxBytes) { BLE.write(RXbuf, rxBytes); }
-}
 /*
-lastRX(maxIFB);
-lastTX(maxIFB);
+  lastRX(maxIFB);
+  lastTX(maxIFB);
 */
 
 void loop() {
@@ -1020,6 +1026,11 @@ void loop() {
   static int scanECU = 0;
   static int doRun = 1;
 
+  static int myGear = 0;
+  static int lastGear = 0;
+  static int myTune = 1;
+  static int lastTune = 0;
+  static int myHWver = 0;
 
   while (doRun) {
     // timekeeping and scheduling
@@ -1051,12 +1062,44 @@ void loop() {
         doRXdecode();
 
         // not a good implementation
-        if (TXpktBuf[4] == 0xfe) {
+        //        if ((TXpktBuf[2] == ECU_TFT) & (TXpktBuf[4] == TFT_SUBbase)) {
+        if ((TXpktBuf[2] == 0x23) & (TXpktBuf[4] == 0xfe)) {
+
 
           temper++;
-          if (temper > 0xff) { temper -= 0x100; }
+          if (temper > 0xff) {
+            temper -= 0x100;
+          }
           //TXpktBuf[0x0a]=ECUbuf[(0x200 * ECU_BMS * 4)+(0x8d * 4 * 2)];
           //TXpktBuf[0x0b]=ECUbuf[(0x200 * ECU_BMS * 4)+(0x8d * 4 * 2)+4];
+
+          // f3 - 1 walk 2 eco 5 drive 3 sport
+          // gt3 1 walk 2 eco 3 sport 4 race
+          myGear = subGet(SUB_GearMode);
+          if (myGear != lastGear) {
+            lastGear = myGear;
+            if (myGear == 2) {
+              myTune = 0;
+            }
+            if (myGear == 3) {
+              if (myHWver == 1) {
+                myTune = 2;
+              }
+              if (myHWver == 2) {
+                myTune = 1;
+              }
+            }
+            if (myGear == 4) {
+              myTune = 2;
+              myHWver = 2;
+            }
+            if (myGear == 5) {
+              myTune = 1;
+              myHWver = 1;
+            }
+          }
+
+          // calculate average voltage and replace distance remaining display
           static int lastVolts = 0;
           lastVolts *= 3;
           lastVolts += volts;
@@ -1070,6 +1113,7 @@ void loop() {
           TXpktBuf[0x09] = (oVolts >> 8) & 0xff;
           subSet();
         }
+
         //TXpktBuf[10]=
         //ECUbuf[(0x200 * 6 * 4) + (2*4*2)]=(temper&0xff);
         if (ecu_cmd_acl[*TXpktCmd] & (1 << ECUbank(*TXpktDst))) {
@@ -1098,10 +1142,31 @@ void loop() {
 
     powerState = ECUbuf[(ECUbank(ECU_BLE) * 0x200 * 4) + (BLE_Power * 2 * 4)] == 1;
 
+    if (tickFast) {
+      tickFast = 0;
+      int mask = 0x0e;
+      if (myTune != lastTune) {
+        lastTune = myTune;
+        if (myTune == 0) {
+          pktXmitCmd(mask, xK0);
+        }
+        if (myTune == 1) {
+          pktXmitCmd(mask, xK1);
+        }
+        if (myTune == 2) {
+          pktXmitCmd(mask, xK2);
+        }
+      }
+    }
+
     if (tickMid) {
       tickMid = 0;
 
+
+
       live.send(String(subGet(SUB_Speed)).c_str(), "speed", timeNow);
+      live.send(String(myGear).c_str(), "gear", timeNow);
+
       live.send(String(volts).c_str(), "volts", timeNow);
       live.send(String(temps).c_str(), "temp", timeNow);
 
@@ -1119,10 +1184,18 @@ void loop() {
           static byte xread[] = { 0x02, MY_ECU, 0x16, 0x01, 0x00, 0x10, 0x00 };
           *TXpktLen = 0x02;
           *TXpktSrc = MY_ECU;
-          if (scanECU == 0) { *TXpktDst = ECU_VCU; }
-          if (scanECU == 1) { *TXpktDst = ECU_BMS; }
-          if (scanECU == 2) { *TXpktDst = ECU_MCU; }
-          if (scanECU == 3) { *TXpktDst = ECU_BLE; }
+          if (scanECU == 0) {
+            *TXpktDst = ECU_VCU;
+          }
+          if (scanECU == 1) {
+            *TXpktDst = ECU_BMS;
+          }
+          if (scanECU == 2) {
+            *TXpktDst = ECU_MCU;
+          }
+          if (scanECU == 3) {
+            *TXpktDst = ECU_BLE;
+          }
           //if (scanECU == 4) { TXpktBuf[2] = 0x23; } // ECU not respond
           *TXpktCmd = 0x01;
           *TXpktArg = scanAddr;
@@ -1399,6 +1472,12 @@ void setupAsyncServer() {
     request->send_P(200, "text/plain", String(getStatVars()).c_str());
   });
 
+  server.on(
+    "/pktlog", HTTP_GET, [](AsyncWebServerRequest *request) {
+      sniffDump = 1;
+      request->redirect("/");
+    });
+
   server.on("/tx", HTTP_GET, [](AsyncWebServerRequest *request) {
     char urlBuf[0x200];
     request->url().toCharArray(urlBuf, 0x200);
@@ -1415,6 +1494,19 @@ void setupAsyncServer() {
 
     request->send(200, "text/plain", String(urlBuf));
   });
+
+  server.on(
+    "/set", HTTP_GET, [](AsyncWebServerRequest *request) {
+      if (request->hasParam("sniff")) {
+        sniffDump = 1;
+        doLog("sniffit");
+      }
+      if (request->hasParam("recover")) {
+        recovery = 1;
+        doLog("recover");
+      }
+      request->redirect("/");
+    });
 
   server.on(
     "/", HTTP_GET, [](AsyncWebServerRequest *request) {

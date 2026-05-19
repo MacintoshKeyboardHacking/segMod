@@ -26,26 +26,31 @@ const byte CMD_AUDIO_CRC = 0x78;    // Verify audio CRC
 
 
 const byte ECU_VCU = 0x16;
+const byte VCU_CMD_Maint = 0x11;
+const byte VCU_CMD_Maint_setTirePressureKnown = 0x01;
+const byte VCU_CMD_Maint_setMaintainCode = 0x02;
 
-const byte CMD_VCU_setTirePressureKnown = 0x11;    // setTirePressureKnown 0x11 0x01
-const byte CMD_VCU_setMaintainCode = 0x11;    // setTirePressureKnown 0x11 0x02
-const byte CMD_VCU_wSN = 0x18; // 0x10
+const byte VCU_CMD_wSN = 0x18;  // 0x10
 
-const byte CMD_VCU_active = 0x57; // 0x00
-const byte CMD_VCU_wMileage = 0x5f; // 0x00
+const byte VCU_CMD_Broken = 0x56;
+const byte VCU_CMD_Broken_YES = 0x01;  // seems to just pause everything...
+const byte VCU_CMD_Broken_NO = 0x00;
 
-const byte CMD_VCU_fileInfo = 0x76; // 0x00
-const byte CMD_VCU_fileWrite = 0x77; // 0x00
-const byte CMD_VCU_fileCRC = 0x78; // 0x01
-const byte CMD_VCU_openAccTimeout = 0x79; // 0x79 0x00
-const byte CMD_VCU_openAcc = 0x79; // len=1
-const byte CMD_VCU_closeAcc = 0x79; // len=2;
+const byte VCU_CMD_active = 0x57;    // 0x00
+const byte VCU_CMD_wMileage = 0x5f;  // 0x00
 
-const byte VCU_SN = 0x10;  // len 0x0e
-const byte VCU_CtrlV = 0x17;
-const byte VCU_MCUV = 0x18;
-const byte VCU_BmsV = 0x19;
-const byte VCU_Bms2V = 0x1A;
+const byte VCU_CMD_fileInfo = 0x76;        // 0x00
+const byte VCU_CMD_fileWrite = 0x77;       // 0x00
+const byte VCU_CMD_fileCRC = 0x78;         // 0x01
+const byte VCU_CMD_openAccTimeout = 0x79;  // 0x79 0x00
+const byte VCU_CMD_openAcc = 0x79;         // 0x79 0x00 0x01 0x00
+const byte VCU_CMD_closeAcc = 0x79;        // 0x79 0x00 0x02 0x00
+
+const byte VCU_SN = 0x10;     // len 0x0e
+const byte VCU_CtrlV = 0x17;  // VCU version
+const byte VCU_MCUV = 0x18;   // MCU version cached
+const byte VCU_BmsV = 0x19;   // BMS version cached
+const byte VCU_Bms2V = 0x1A;  // BMS2 version cached
 const byte VCU_FunDisplayBool = 0x1B;
 
 const byte VCU_Bool = 0x1C;  // vcu_status
@@ -76,7 +81,7 @@ const byte VCU_FunBool3_AutoHeadlight = (1 << 0);
 const byte VCU_InfoBool2 = 0x1F;
 
 const byte VCU_PN = 0x20;
-const byte VCU_InstumentKey = 0x2E;
+const byte VCU_InstumentKey = 0x2E;  // VCU_BLE_HBPHASE
 const byte VCU_BLE_HBPHASE = 0x2e;
 
 const byte VCU_FunBool4 = 0x2F;
@@ -86,49 +91,45 @@ const byte VCU_FunDisplayBool4 = 0x32;
 const byte VCU_FunDisplayBool5 = 0x33;
 
 const byte VCU_ActDate = 0x40;
-const byte VCU_StartSpeed = 0x42;
-const byte VCU_GearEDMin = 0x43;  // ECO, DRIVE MIN
-const byte VCU_GearSRMin = 0x44;  // SPORT, RACE MIN
-const byte VCU_GearEDMax = 0x45;  // MAX
-const byte VCU_GearSRMax = 0x46;
-//const byte VCU_MaxSpeed = 0x46;
+const byte VCU_StartSpeed = 0x42;  // rw
+const byte VCU_GearEDMin = 0x43;   // ECO, DRIVE MIN
+const byte VCU_GearSRMin = 0x44;   // SPORT, RACE MIN
+const byte VCU_GearEDMax = 0x45;   // MAX
+const byte VCU_GearSRMax = 0x46;   // max speed
 const byte VCU_GearED = 0x47;
 const byte VCU_GearSR = 0x48;
 const byte VCU_AutoOffTime = 0x49;
 const byte VCU_CustomKey = 0x4A;
 const byte VCU_ChargeStartTime = 0x4B;
-//const byte VCU_PWRDIAG = 0x4b;	// can't read when off
 const byte VCU_ChargeEndTime = 0x4C;
-const byte VCU_0x4f_0x02 = 0x4f;
+const byte VCU_0x4f_0x02 = 0x4f;  // rw
 const byte VCU_Battery = 0x55;
 const byte VCU_Batt_Pct = 0x55;
-const byte VCU_Speed = 0x57;  //VCU_THROTTLE 0x0-0x1b4?
-const byte VCU_ErrorCode = 0x58;
+const byte VCU_Speed = 0x57;      //VCU_THROTTLE 0x0-0x1b4?
+const byte VCU_ErrorCode = 0x58;  // segway error code
 const byte VCU_WarnCode = 0x59;
-const byte VCU_GearMode = 0x5A;
-const byte VCU_DriveMode = 0x5a;
-const byte VCU_LedMode = 0x5B;
-const byte VCU_ProjectionLightMode = 0x5C;
-const byte VCU_TailLightMode = 0x5D;  // brake_flash
+const byte VCU_GearMode = 0x5A;             // drive mode
+const byte VCU_LedMode = 0x5B;              // rw
+const byte VCU_ProjectionLightMode = 0x5C;  // rw
+const byte VCU_TailLightMode = 0x5D;        // rw brake_flash
 const byte VCU_PreciseMileage = 0x5E;
-const byte VCU_LeftMileage = 0x5F;  // 4 byte
+const byte VCU_LeftMileage = 0x5F;
 
-const byte VCU_Pwd = 0x61;  // codeLock
+const byte VCU_Pwd = 0x61;      // rw codeLock
 const byte VCU_Mileage = 0x62;  // .1 km
 const byte VCU_Runtime = 0x64;
 const byte VCU_RideTime = 0x66;
 const byte VCU_SingleMileage = 0x68;  // .1 km
 const byte VCU_RunningTime = 0x69;
 const byte VCU_SingleRideTime = 0x6A;
-const byte VCU_BodyTemp = 0x6B;  // deg c*10
-const byte VCU_Temp = 0x6b;      // deg c*10
-const byte VCU_someTemp = 0x6d; // ?? deg c
-const byte VCU_SGear = 0x6E;    // ??
+const byte VCU_BodyTemp = 0x6B;   // deg c*10
+const byte VCU_Temp = 0x6b;       // deg c*10
+const byte VCU_0x6d_0x02 = 0x6d;  //
+const byte VCU_SGear = 0x6E;      // ??
 
-const byte VCU_DecMode = 0x70;  // VCU_KERS ?
+const byte VCU_DecMode = 0x70;  // rw VCU_KERS
 const byte VCU_KeyPwd = 0x71;
-//const byte VCU_PAT_LOCK = 0x71;
-const byte VCU_AlarmLevel = 0x74;  // sensitivity
+const byte VCU_AlarmLevel = 0x74;  // rw sensitivity
 
 const byte VCU_BumpyRoad = 0x75;
 const byte VCU_VoiceVolume = 0x76;
@@ -141,19 +142,19 @@ const byte VCU_0x84_0x02 = 0x84;
 
 const byte VCU_MCUCPUId = 0xc0;  // len 0x0c, MCU_CPUId (02:0xDA)
 const byte VCU_MCUFlag = 0xc6;
-const byte VCU_MCURand = 0xc7;  // len 0x06
-const byte VCU_Light = 0xd2;
-const byte VCU_CPUId = 0xDA;  // len 0x0c
-const byte VCU_Rand = 0xe4;   // len 0x06
+const byte VCU_MCURand = 0xc7;      // len 0x06
+const byte VCU_LightSensor = 0xd2;  // value written by TFT
+const byte VCU_CPUId = 0xDA;        // len 0x0c
+const byte VCU_0xe0_0x04 = 0xe0;    // rw
+const byte VCU_Rand = 0xe4;         // len 0x06
 const byte VCU_Flag = 0xe7;
 const byte VCU_EncryptionFlag = 0xE8;
-// VCU 0xfa
+const byte VCU_0xe9_0x02 = 0xe9;
+
 
 const byte ECU_BMS = 0x07;
-const byte ECU_CMD_wSysTime = 0x2b; // 0x10
-const byte ECU_CMD_setBrownOut = 0x7a; // 0x00
-
-
+const byte BMS_CMD_wSysTime = 0x2b;     // 0x10
+const byte BMS_CMD_setBrownOut = 0x7a;  // 0x00
 
 const byte BMS_BatterySN = 0x02;  // len 0x0e
 const byte BMS_ManufactureDate = 0x0A;
@@ -196,7 +197,6 @@ const byte BMS_Charge_Pct = 0x8f;
 
 const byte BMS_ChargeStatus = 0x92;
 const byte BMS_TimeFull = 0x94;  // charge minutes remaining
-//const byte BMS_CHARGE_TIME = 0x94;
 const byte BMS_CellTemps = 0x96;
 const byte BMS_CellVolts = 0xA0;
 
@@ -214,35 +214,53 @@ const byte BMS_Temp = 0xf9;
 const byte ECU_MCU = 0x02;  // verified on gt3pro
 
 const byte MCU_PN = 0x10;
+const byte MCU_0x1b_0x04 = 0x1b;  //rw
+const byte MCU_0x23_0x02 = 0x23;  //rw
+
 const byte MCU_Temp = 0x3e;
-const byte MCU_TEMP_A_LASTMAX = 0x40;
-const byte MCU_TEMP_B_LASTMAX = 0x41;
+const byte MCU_TEMP_ALT_A = 0x40;
+const byte MCU_TEMP_ALT_B = 0x41;
+
+const byte MCU_0x42_0x02 = 0x42;  //rw
+const byte MCU_0x44_0x02 = 0x44;  //rw
+const byte MCU_0x46_0x02 = 0x46;  //rw
+
 const byte MCU_TEMP_A = 0x48;  // deg C * 10
 const byte MCU_TEMP_B = 0x49;
 
-// fake news: 0x26: = speed in km/h * 10?
-// 0x65: tempC-20???
-// 0x85: kph*10???
-// 0x86: regen???
+const byte MCU_0x50_0x04 = 0x50;  //rw
+const byte MCU_0x53_0x02 = 0x53;  //rw
+
+const byte MCU_0x70_0x06 = 0x70;  //rw
 
 const byte MCU_Brakes = 0x80;
 const byte MCU_Throttle = 0x81;
 const byte MCU_0x82_0x02 = 0x82;  //+20=2wd +40=turbo
 const byte MCU_Mode = 0x83;
+const byte MCU_0x84_0x02 = 0x84;  // rw
+
 const byte MCU_Speed = 0x86;
+// 87, regen?
+const byte MCU_0x88_0x0e = 0x88;  // rw
 const byte MCU_Volts = 0x8f;
 
 const byte MCU_UNK_SIGNED_A = 0x91;
 const byte MCU_UNK_SIGNED_B = 0x92;
+
+const byte MCU_0x95_0x02 = 0x95;  // rw
+const byte MCU_0xae_0x02 = 0xae;  // NO RESP
+const byte MCU_0xaf_0x02 = 0xaf;  // rw
+const byte MCU_0xc6_0x02 = 0xc6;  // f3 - fast ticking timer, resets to 0 at poweroff //len 0x12;  // rw
+
+
 const byte MCU_CPUId = 0xda;
 const byte MCU_Flag = 0xe0;  // probably...
 const byte MCU_Rand = 0xe1;
 const byte MCU_Rand2 = 0xe4;  // why 2?
 const byte MCU_0xE7_0x02 = 0xe7;
+const byte MCU_0xf0_0x02 = 0xaf;  // rw
 
 const byte ECU_BLE = 0x04;
-
-// cmd 6f
 const byte CMD_BLE = 0x6f;
 const byte CMD_BLE_getInfo = 0x01;  // cmd 6f
 const byte CMD_BLE_unlockEnable = 0x02;
@@ -252,44 +270,40 @@ const byte CMD_BLE_rssiGet = 0x05;
 const byte CMD_BLE_setConnectMode = 0x0c;
 const byte CMD_BLE_getConnectMode = 0x0d;
 const byte CMD_BLE_mediaEnable = 0x10;
-const byte CMD_BLE_rFindMyPairBroadcast = 0x22;
 const byte CMD_BLE_rFindMyBondStatus = 0x21;
+const byte CMD_BLE_rFindMyPairBroadcast = 0x22;
 const byte CMD_BLE_rFindMyLocationStatus = 0x24;
 const byte CMD_BLE_rUUID = 0x25;
 const byte CMD_BLE_setUUID = 0x26;
 const byte CMD_BLE_rPPID = 0x27;
 
 const byte CMD_BLE_clearAllKeys = 0x80;
-
-
 const byte ECU_BLE_POWER = 0x51;
 
 const byte BLE_Version = 0x01;
 const byte BLE_MAC_Addr = 0x02;
+const byte BLE_FindMyStatus = 0x1d;
+const byte BLE_unbondFindMy = 0x1f;
+const byte BLE_FindMyEnable = 0x20;
+const byte BLE_openFindMyPairBroadcast = 0x3a;
 const byte BLE_0x3c_0x02 = 0x3c;
 const byte BLE_FunSupBool = 0x50;
 const byte BLE_Power = 0x51;
 const byte BLE_0x52_0x02 = 0x52;
 const byte BLE_0x53_0x02 = 0x53;
-
 const byte BLE_unk1 = 0x61;
 
-const byte BLE_FindMyStatus = 0x1d;
-const byte BLE_unbondFindMy = 0x1f;
-const byte BLE_FindMyEnable = 0x20;
-const byte BLE_openFindMyPairBroadcast = 0x3a;
 
 
 const byte ECU_TFT = 0x23;
 const byte CMD_TFT = 0x71;
-const byte CMD_TFT_setNaviStart = 0x00; // 0x71
-const byte CMD_TFT_setNaviDistance = 0x01; // 0x71
-const byte CMD_TFT_setNaviInfo = 0x03; // 0x71
-const byte CMD_TFT_setNaviRoad = 0x10; // 0x71
-const byte CMD_TFT_setNaviRoadNext = 0x24; // 0x71
-const byte CMD_TFT_setNaviText = 0x38; // 0x71
-const byte CMD_TFT_setNaviExit = 0xff; // 0x71
-
+const byte CMD_TFT_setNaviStart = 0x00;     // 0x71
+const byte CMD_TFT_setNaviDistance = 0x01;  // 0x71
+const byte CMD_TFT_setNaviInfo = 0x03;      // 0x71
+const byte CMD_TFT_setNaviRoad = 0x10;      // 0x71
+const byte CMD_TFT_setNaviRoadNext = 0x24;  // 0x71
+const byte CMD_TFT_setNaviText = 0x38;      // 0x71
+const byte CMD_TFT_setNaviExit = 0xff;      // 0x71
 
 const byte TFT_Version = 0x01;
 const byte TFT_0x24_0x02 = 0x24;
@@ -299,15 +313,16 @@ const byte TFT_TurnSig = 0x60;
 const byte TFT_Display = 0x62;    // unk, set 00 00 = display now?  (also 0c.. 14.. 24..)
 const byte TFT_Countdown = 0x64;  // countdown
 const byte TFT_unk2 = 0xd1;
-const byte TFT_CodeInput = 0xd3;
-const byte TFT_0xd4_0x02 = 0xd4;
+const byte TFT_CodeInput = 0xd3;  // 4 bytes
 const byte TFT_Alert = 0xd5;
+
+const byte TFT_SUBbase = 0xfe;
 
 
 // 16bits
 const unsigned long SUB_7e765289 = 0x7e765289;
-const unsigned long SUB_Mileage = 0xddaa7a89;   // max 3 digits fit GT3
-const unsigned long SUB_TripDist = 0xac440ac5;  // 1 mile on GT3, .1 miles on G3/F3
+const unsigned long SUB_DistRemain = 0xddaa7a89;  // max 3 digits fit GT3
+const unsigned long SUB_TripDist = 0xac440ac5;    // 1 mile on GT3, .1 miles on G3/F3
 const unsigned long SUB_a3ddd1b3 = 0xa3ddd1b3;
 const unsigned long SUB_a3ddd1b2 = 0xa3ddd1b2;
 const unsigned long SUB_a3ddd1ad = 0xa3ddd1ad;
@@ -322,12 +337,12 @@ const unsigned long SUB_229a0092 = 0x229a0092;
 // 8bits
 const unsigned long SUB_BatteryPct = 0xa4f6d064;
 const unsigned long SUB_EcoBattery = 0x616a4512;
-const unsigned long SUB_b3e2e070 = 0xb3e2e070;
+const unsigned long SUB_b3e2e070 = 0xb3e2e070;  // more batt
 const unsigned long SUB_e799388a = 0xe799388a;
 
 // 4bits
 const unsigned long SUB_Charging = 0x8689b2da;
-const unsigned long SUB_DriveMode = 0x7e0124a1;
+const unsigned long SUB_GearMode = 0x7e0124a1;
 const unsigned long SUB_ShutdownTimer = 0xf8f9cb4b;
 const unsigned long SUB_Headlight = 0xa2bc1d75;
 
