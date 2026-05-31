@@ -45,7 +45,7 @@ char MANUFDAT[8] = { 0x4E, 0x43, 0x01, 0x00, 0x00, 0x00, 0x00, 0xfe };  // speci
 
 
 #define wifiEnable yes
-#define doBLE yes
+// #define doBLE yes // not ready yet!
 #define ESPLED yup
 const byte MY_ECU = 0x3f;
 
