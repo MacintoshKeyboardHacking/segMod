@@ -9,7 +9,43 @@
 // for ESP32-S3-Zero. Specifically, TX is GPIO43, and RX is GPIO44' but I couldn't get any output.
 // also, "ESP32-S3 Boards with Native USB Not Booting without USB Host Serial"
 
+#include <BLEDevice.h>
+#include <BLEServer.h>
+#include <BLEUtils.h>
+#include <BLE2902.h>
+
+#include "esp_wifi.h"    // for change wifi mac
+#include "esp_mac.h"    // for change base mac
+
+
+
+#define UART "6E400001-B5A3-F393-E0A9-E50E24DCCA9E"
+#define UART_RX "6E400002-B5A3-F393-E0A9-E50E24DCCA9E"
+#define UART_TX "6E400003-B5A3-F393-E0A9-E50E24DCCA9E"
+
+#define SERVICE2_UUID "FE95"
+#define SERVICE2_CHA1 "0014"
+
+BLEServer *pServer = NULL;
+BLECharacteristic *pCharacteristic = NULL;
+BLECharacteristic *pTxCharacteristic = NULL;
+
+bool deviceConnected = false;
+bool oldDeviceConnected = false;
+uint meCount = 0;
+uint sendUpdate = 0;
+
+// unencrypted max g30 char MANUFDAT[8] = { 0x4E, 0x42, 0x24, 0x00, 0x00, 0x00, 0x00, 0xDB };
+
+char MANUFDAT[8] = { 0x4E, 0x43, 0x01, 0x00, 0x00, 0x00, 0x00, 0xfe };  // specifies kickscooter zt3, wrong enc
+
+//char MANUFDAT[8] = { 0x4E, 0x42, 0x01, 0x03, 0x00, 0x00, 0x00, 0xfb };
+
+
+
+
 #define wifiEnable yes
+#define doBLE yes
 #define ESPLED yup
 const byte MY_ECU = 0x3f;
 
@@ -43,7 +79,8 @@ byte ecu_cmd_acl[] = { 0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x0
                        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                       0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+                       0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+                     };
 
 
 //notes to self...
@@ -58,6 +95,7 @@ EXT_RAM_NOINIT_ATTR WORD_ALIGNED_ATTR uint32_t PSRbuf[(0x200 * maxECU)];
 
 int PKT_MAX_LEN = 264;
 //static byte *TXpkt;                             // ECU malloc() as u8
+
 
 const int rxBS = 0x20;  // serial interface block transfer size
 WORD_ALIGNED_ATTR byte RXbuf[rxBS];
@@ -116,12 +154,10 @@ const byte xK2[] = { 0x00, MY_ECU, 0x16, 0x03, 0x70, 0x02, 0x00 };
 //const byte xK1[] = { 0x00, MY_ECU, ECU_VCU, CMD_WRITE_NR, VCU_DecMode, 0x01, 0x00 };
 //const byte xK0[] = { 0x00, MY_ECU, ECU_VCU, CMD_WRITE_NR, VCU_DecMode, 0x00, 0x00 };
 
-
 int fullRead = 1;
 int temper = 0;
 int tempad = 0;
 int tempac = 7;
-
 
 
 int subCount = 0;
@@ -151,6 +187,7 @@ unsigned long int RXinc = 0;
 unsigned long int RXbad = 0;
 unsigned long int TXyes = 0;
 unsigned long int TXno = 0;
+
 /* ECU32 flags
 
   31    // had read
@@ -165,7 +202,6 @@ unsigned long int TXno = 0;
   3 rw flags 3 age 2 min 2 min AND 1 max 1 max OR 0 cur 0 cur
 
   31 - 24 flags 23 - 16 15 - 8 what was there 7 - 0 actual data "what should be there"
-
 */
 
 int ECU_read = (1 << 31);       // had read
@@ -192,7 +228,6 @@ AsyncEventSource live("/live");
 
 #include <AsyncWebSerial.h>
 AsyncWebSerial webSerial;
-
 #endif
 
 int diagLEDtiming = 2048;
@@ -207,7 +242,7 @@ int diagLEDs = 1;
 __NOINIT_ATTR int formatting;
 int rebooting = 0;
 int recovery = 0;
-int doLogDst = 1;  // bitmask of log destinations
+int doLogDst = 0x09;  // bitmask of log destinations
 
 unsigned long timeOld = 0;
 unsigned long timeNow = 0;
@@ -243,7 +278,8 @@ CRGB leds[NUM_LEDS];
 
 void IRAM_ATTR doLog(const char *var) {
   if (doLogDst & 0x01) {
-    webSerial.print(var);
+    //webSerial.print(var);
+    Serial.println(var);
   }
   if (doLogDst & 0x02) {
     VCU.println(var);
@@ -252,7 +288,7 @@ void IRAM_ATTR doLog(const char *var) {
     BLE.println(var);
   }
   if (doLogDst & 0x08) {
-    // ToDo: send "standard" CMD20 log messages like the BLE does
+    webSerial.print(var);
   }
 }
 
@@ -400,6 +436,55 @@ void ARDUINO_ISR_ATTR setRecovery() {
   sniffDump = 1;  //deBUG
 }
 
+class MyServerCallbacks : public BLEServerCallbacks {
+    void onConnect(BLEServer *pServer) {
+      deviceConnected = true;
+    }
+    void onDisconnect(BLEServer *pServer) {
+      deviceConnected = false;
+    }
+};
+
+
+class MyCallbacks : public BLECharacteristicCallbacks {
+    void onRead(BLECharacteristic *pCharacteristic) {
+      Serial.println("CHAREAD");
+    }
+    void onWrite(BLECharacteristic *pCharacteristic) {
+      String rxValue = pCharacteristic->getValue();
+      if (rxValue.length() > 0) {
+        Serial.print("RX:");
+        for (int i = 0; i < rxValue.length(); i++) {
+          if (rxValue[i] < 16) Serial.print("0");
+          Serial.print(rxValue[i], HEX);
+        }
+        Serial.println(":");
+        sendUpdate = true;
+      }
+    }
+};
+
+
+// write desired manufacturing datablock to 0xfe95/0x0014
+class tweakCB : public BLECharacteristicCallbacks {
+    void onWrite(BLECharacteristic *tweakCha) {
+      String manStr = tweakCha->getValue();
+
+      if (manStr.length() > 0) {
+        Serial.print("TWEAK:");
+        for (int i = 0; i < manStr.length(); i++) {
+          if (manStr[i] < 16) Serial.print('0');
+          Serial.print(manStr[i], HEX);
+        }
+        Serial.println();
+      }
+      BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
+      BLEAdvertisementData oAdvertisementData = BLEAdvertisementData();
+      oAdvertisementData.setManufacturerData(manStr);
+      pAdvertising->setAdvertisementData(oAdvertisementData);
+    }
+};
+
 
 void setup() {
   setCpuFrequencyMhz(80);
@@ -452,6 +537,7 @@ void setup() {
   diagLED(-1);
 
   initECU();
+  //*rxBS1=0x20;
   powerState = ECUbuf[(ECUbank(ECU_BLE) * 0x200 * 4) + (BLE_Power * 2 * 4)] != 0;
 
   // initialize IFB buffers
@@ -459,6 +545,11 @@ void setup() {
   ifTX = (byte *)malloc(IFBlen);
 
   protoInit();
+
+#ifdef doBLE
+  doLog("BLE setup");
+  BLEinit();
+#endif
 
   doLog("READY");
   diagLED(7);
@@ -561,26 +652,27 @@ IRAM_ATTR int subGet(const unsigned long reg) {
 IRAM_ATTR byte ECUbank(const int ECUid) {
   switch (ECUid) {
     case ECU_MCU:
-      return {
-        0x06
-      };
+      {
+        return (0x06);
+      }
     case ECU_VCU:
-      return {
-        0x01
-      };
+      {
+        return (0x01);
+      }
     case ECU_BLE:
-      return {
-        0x03
-      };
+      {
+        return (0x03);
+      }
     case ECU_BMS:
-      return {
-        0x04
-      };
+      {
+        return (0x04);
+      }
     case ECU_TFT:
-      return {
-        0x05
-      };
+      {
+        return (0x05);
+      }
   }
+  return (0x00);
 }
 
 IRAM_ATTR byte setECUptr(const byte ECU, const byte ADR) {
@@ -618,7 +710,9 @@ void initECU() {
 
   if (PSRrestore()) {
     RTCrestore();
-  };
+  } else {
+    fullRead = 0;
+  }
 }
 /*
   void doCmdPkt(const int ifb) {
@@ -784,12 +878,6 @@ int doRXpkt(const int ifb) {
   return (0);
 }
 
-/*
-    211 5a a5 02 16 23 03 60 00 00 61 ff
-    127 5a a5 02 16 23 03 60 01 00 60 ff
-     85 5a a5 02 16 23 03 60 02 00 5f ff
-      3 5a a5 06 16 23 03 3d 00 00 14 0c 2f 17 1a ff clock
-*/
 
 void doRXdecode() {
   byte *tmp = (byte *)TXpkt;
@@ -861,7 +949,6 @@ void doRXdecode() {
 
 void IRAM_ATTR pktXmitBuf(const int mask) {
   //timeTXecu[0]=timeNow;
-
   //timeTXifb[0]=timeNow;
   //if timeTXdelay[(*TXpktDst)]
 
@@ -873,7 +960,9 @@ void IRAM_ATTR pktXmitBuf(const int mask) {
   if (mask & 0x02) {
     //timeTX(0)=timeNow;
     //timeTX(2)=timeNow;
-    VCU.write(TXpkt, (*TXpktLen + 9));
+    if ((*TXpktDst == 0x16) | (*TXpktDst == 0x07) | (*TXpktDst == 0x02) | (*TXpktDst == 0x00)) {
+      VCU.write(TXpkt, (*TXpktLen + 9));
+    }
   }
   if (mask & 0x04) {
     //timeTX(0)=timeNow;
@@ -889,9 +978,11 @@ void IRAM_ATTR pktXmitBuf(const int mask) {
       myStat += String(val, HEX);
     }
     if (sniffDump) {
-      if ((*TXpktSrc != 0x23) & (*TXpktDst != 0x23)) {
+      if (((*TXpktArg != 0xfe) | (*TXpktDst != 0x23)) & ((*TXpktArg != 0xfc) | ((*TXpktDst != 0x23) & (*TXpktSrc != 0x23))) & ((*TXpktArg != 0xd2) | ((*TXpktDst != 0x16) & (*TXpktSrc != 0x23)))) {
         doLog(myStat.c_str());
       }
+    } else {
+      Serial.write(TXpkt, (*TXpktLen + 9));
     }
   }
 }
@@ -958,6 +1049,59 @@ void protoInit() {
   subMap();
 }
 
+void BLEinit() {
+  //void BLEServer::updatePeerMTU(uint16_t conn_id, uint16_t mtu) {
+  // BLE Device
+  //  BLEDevice::init(hostname);
+  BLEDevice::init(hostname);
+
+  pServer = BLEDevice::createServer();
+  pServer->setCallbacks(new MyServerCallbacks());
+
+  BLEService *pService = pServer->createService(UART);
+  BLECharacteristic *pRxCharacteristic = pService->createCharacteristic(UART_RX,
+                                         BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
+  pRxCharacteristic->setCallbacks(new MyCallbacks());
+
+  pTxCharacteristic = pService->createCharacteristic(UART_TX,
+                      BLECharacteristic::PROPERTY_NOTIFY);
+  BLE2902 *p2902Descriptor = new BLE2902();
+  p2902Descriptor->setIndications(true);
+  pTxCharacteristic->addDescriptor(p2902Descriptor);
+  pService->start();
+
+  // Xiaomi 0xfe95 services
+  BLEService *pService2 = pServer->createService(SERVICE2_UUID);
+  BLECharacteristic *pService2C = pService2->createCharacteristic("0014", BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE);
+
+  pService2C->setValue(MANUFDAT);
+  pService2C->setCallbacks(new tweakCB());
+  pService2->start();
+
+  String manStr(MANUFDAT, 8);
+  BLEAdvertisementData oAdvertisementData = BLEAdvertisementData();
+  oAdvertisementData.setFlags(ESP_BLE_ADV_FLAG_GEN_DISC | ESP_BLE_ADV_FLAG_BREDR_NOT_SPT);
+
+  oAdvertisementData.setName("03GGG0000C0000");
+  oAdvertisementData.setManufacturerData(manStr);
+
+  BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
+  pAdvertising->setAdvertisementData(oAdvertisementData);
+
+  // Scan Response Data
+  BLEAdvertisementData scanResponseData;
+  scanResponseData.setCompleteServices(BLEUUID(UART));
+  pAdvertising->setScanResponseData(scanResponseData);
+
+  // Adertising settings
+  pAdvertising->addServiceUUID(BLEUUID(UART));
+
+  pAdvertising->setScanResponse(true);
+  pAdvertising->setMinPreferred(0x06);  // functions that help with iPhone connections issue
+  pAdvertising->start();
+  //BLEDevice::startAdvertising();
+}
+
 unsigned long getStatVars() {
   int battCells = ECUbuf[(ECUbank(ECU_BMS) * 0x200 * 4) + (BMS_SERIES_CELLS * 2 * 4)];  // BUG: move to init
   const int battTemps = 0x08;                                                           // BUG: read from BMS
@@ -983,7 +1127,7 @@ unsigned long getStatVars() {
 
   battC += 1;
   if (battC > battCells) {
-    battC -= battCells;
+    battC = 0;
   }
 
   // get the temps
@@ -1015,6 +1159,7 @@ unsigned long getStatVars() {
 */
 
 void loop() {
+
   static int ecuPhase = 0;
   static int ifbPhase = 0;
 
@@ -1028,8 +1173,11 @@ void loop() {
 
   static int myGear = 0;
   static int lastGear = 0;
-  static int myTune = 1;
-  static int lastTune = 0;
+  static int myKers = 1;
+  static int myTCS = 1;
+
+  static int lastKers = 0;
+  static int lastTCS = 1;
   static int myHWver = 0;
 
   while (doRun) {
@@ -1056,6 +1204,19 @@ void loop() {
       tickSlow = 1;
     }
 
+    if (deviceConnected && !oldDeviceConnected) {
+      Serial.println("connected");
+      oldDeviceConnected = deviceConnected;
+    }
+    if (!deviceConnected && oldDeviceConnected) {
+      Serial.println("disconnected");
+      delay(500);
+      BLEDevice::startAdvertising();
+      oldDeviceConnected = deviceConnected;
+    }
+
+
+
     int count = 0;
     if (doRX(ifbPhase)) {
       while (doRXpkt(ifbPhase)) {
@@ -1064,8 +1225,6 @@ void loop() {
         // not a good implementation
         //        if ((TXpktBuf[2] == ECU_TFT) & (TXpktBuf[4] == TFT_SUBbase)) {
         if ((TXpktBuf[2] == 0x23) & (TXpktBuf[4] == 0xfe)) {
-
-
           temper++;
           if (temper > 0xff) {
             temper -= 0x100;
@@ -1078,24 +1237,29 @@ void loop() {
           myGear = subGet(SUB_GearMode);
           if (myGear != lastGear) {
             lastGear = myGear;
-            if (myGear == 2) {
-              myTune = 0;
+            if (myGear == 2) {  // eco
+              myKers = 0;
+              myTCS = 1;
             }
-            if (myGear == 3) {
+            if (myGear == 3) {   // sport
               if (myHWver == 1) {
-                myTune = 2;
+                myKers = 1;  // was 2...
+                myTCS = 0;
               }
               if (myHWver == 2) {
-                myTune = 1;
+                myKers = 1;
+                myTCS = 1;
               }
             }
-            if (myGear == 4) {
-              myTune = 2;
-              myHWver = 2;
+            if (myGear == 4) {  // race
+              myKers = 1;   // was 2...
+              myTCS = 1;
+              myHWver = 2;  // GT3
             }
-            if (myGear == 5) {
-              myTune = 1;
-              myHWver = 1;
+            if (myGear == 5) {    // drive
+              myKers = 1;
+              myTCS = 1;
+              myHWver = 1;  // F3/G3
             }
           }
 
@@ -1107,17 +1271,20 @@ void loop() {
             lastVolts -= 2;
             lastVolts /= 4;
           }
-          //          int oVolts = (lastVolts - 5) / 10;
+          // BUG - using fixed offset instead of subLookup()
           int oVolts = (lastVolts - 50) / 100;  // looks great on F3, no decimal on GT3
           TXpktBuf[0x08] = oVolts & 0xff;       // debug volts in remaining range
           TXpktBuf[0x09] = (oVolts >> 8) & 0xff;
-          subSet();
-        }
 
+          subSet(); // repack sub buffer
+        }
         //TXpktBuf[10]=
         //ECUbuf[(0x200 * 6 * 4) + (2*4*2)]=(temper&0xff);
         if (ecu_cmd_acl[*TXpktCmd] & (1 << ECUbank(*TXpktDst))) {
           ECUbuf[(0x200 * 7 * 4) + (0x10 * 4 * 2)]++;  // packet metrics: acl yes
+          if (ifbPhase == 0) {
+            pktSend(0x06);
+          }
           if (ifbPhase == 1) {
             pktSend(0x0c);
           }
@@ -1145,24 +1312,33 @@ void loop() {
     if (tickFast) {
       tickFast = 0;
       int mask = 0x0e;
-      if (myTune != lastTune) {
-        lastTune = myTune;
-        if (myTune == 0) {
+      if (myKers != lastKers) {
+        lastKers = myKers;
+        if (myKers == 0) {
           pktXmitCmd(mask, xK0);
         }
-        if (myTune == 1) {
+        if (myKers == 1) {
           pktXmitCmd(mask, xK1);
         }
-        if (myTune == 2) {
+        if (myKers == 2) {
           pktXmitCmd(mask, xK2);
+        }
+      }
+      if (myTCS != lastTCS) {
+        lastTCS = myTCS;
+        if (myTCS == 0) {
+          byte xTCS[] = { 0x02, MY_ECU, 0x16, 0x02, 0x1d, ECUbuf[(ECUbank(ECU_VCU) * 0x200 * 4) + (0x1d * 2 * 4)] & 0xfe };
+          pktXmitCmd(mask, xTCS);
+        }
+        if (myTCS == 1) {
+          byte xTCS[] = { 0x02, MY_ECU, 0x16, 0x02, 0x1d, (ECUbuf[(ECUbank(ECU_VCU) * 0x200 * 4) + (0x1d * 2 * 4)] & 0xfe) + 1 };
+          pktXmitCmd(mask, xTCS);
         }
       }
     }
 
     if (tickMid) {
       tickMid = 0;
-
-
 
       live.send(String(subGet(SUB_Speed)).c_str(), "speed", timeNow);
       live.send(String(myGear).c_str(), "gear", timeNow);
@@ -1277,7 +1453,14 @@ void loop() {
 
 #ifdef wifiEnable
 void wifiConnect() {
-  WiFi.setHostname(hostname);
+
+  uint8_t myMAC[] = {0xf4, 0x1a, 0x7a, 0x6d, 0xd5, 0xf6}; // read from ecu 0x04, -1
+  // esp_iface_mac_addr_set(&myMAC[0], ESP_MAC_BT);
+
+  //  esp_wifi_get_mac(WIFI_IF_STA, stockMAC);
+  //  esp_base_mac_addr_set(&myMAC[0]);
+
+  WiFi.setHostname(hostname); // read from ecu 0x04?
   WiFi.mode(WIFI_STA);
 
   WiFi.begin(ssid, password);
@@ -1358,127 +1541,127 @@ void notFound(AsyncWebServerRequest *request) {
 
 void setupAsyncServer() {
   server.on(
-    "/admin", HTTP_GET, [](AsyncWebServerRequest *request) {
-      if (!request->authenticate(http_username, http_password)) {
-        return request->requestAuthentication();
-      }
-      request->send_P(200, "text/html", admin_html, varProc);
-    });
+  "/admin", HTTP_GET, [](AsyncWebServerRequest * request) {
+    if (!request->authenticate(http_username, http_password)) {
+      return request->requestAuthentication();
+    }
+    request->send_P(200, "text/html", admin_html, varProc);
+  });
 
   server.on(
-    "/update", HTTP_POST, [](AsyncWebServerRequest *request) {
-      rebooting = !Update.hasError();
-      AsyncWebServerResponse *response = request->beginResponse(200, "text/html", rebooting ? ok_html : failed_html);
-      response->addHeader("Connection", "close");
-      request->send(response);
-    },
-    updateFlash);
+  "/update", HTTP_POST, [](AsyncWebServerRequest * request) {
+    rebooting = !Update.hasError();
+    AsyncWebServerResponse *response = request->beginResponse(200, "text/html", rebooting ? ok_html : failed_html);
+    response->addHeader("Connection", "close");
+    request->send(response);
+  },
+  updateFlash);
 
   server.on(
-    "/upload", HTTP_POST, [](AsyncWebServerRequest *request) {
-      request->redirect("/admin");
-    },
-    uploadFile);
+  "/upload", HTTP_POST, [](AsyncWebServerRequest * request) {
+    request->redirect("/admin");
+  },
+  uploadFile);
 
   server.on(
-    "/format", HTTP_POST, [](AsyncWebServerRequest *request) {
-      doLog("user set format");
-      formatting = 1;
-      request->send(200);
-      rebooting = 1;
-    });
+  "/format", HTTP_POST, [](AsyncWebServerRequest * request) {
+    doLog("user set format");
+    formatting = 1;
+    request->send(200);
+    rebooting = 1;
+  });
 
   server.on(
-    "/reboot", HTTP_GET, [](AsyncWebServerRequest *request) {
-      doLog("user reboot");
-      request->send(200);
-      rebooting = 1;
-    });
+  "/reboot", HTTP_GET, [](AsyncWebServerRequest * request) {
+    doLog("user reboot");
+    request->send(200);
+    rebooting = 1;
+  });
 
   server.on(
-    "/on", HTTP_GET, [](AsyncWebServerRequest *request) {
-      int mask = 0x0e;
-      pktXmitCmd(mask, xTurnOn);
-      delay(500);
-      pktXmitCmd(mask, xTurnOn);
-      request->redirect("/");
-    });
+  "/on", HTTP_GET, [](AsyncWebServerRequest * request) {
+    int mask = 0x0e;
+    pktXmitCmd(mask, xTurnOn);
+    delay(500);
+    pktXmitCmd(mask, xTurnOn);
+    request->redirect("/");
+  });
 
   server.on(
-    "/off", HTTP_GET, [](AsyncWebServerRequest *request) {
-      int mask = 0x0e;
-      pktXmitCmd(mask, xTurnOff);
-      request->redirect("/");
-    });
+  "/off", HTTP_GET, [](AsyncWebServerRequest * request) {
+    int mask = 0x0e;
+    pktXmitCmd(mask, xTurnOff);
+    request->redirect("/");
+  });
 
   server.on(
-    "/ecu/vcu", HTTP_GET, [](AsyncWebServerRequest *request) {
-      myECU = 1;
-      request->redirect("/");
-    });
+  "/ecu/vcu", HTTP_GET, [](AsyncWebServerRequest * request) {
+    myECU = 1;
+    request->redirect("/");
+  });
 
   server.on(
-    "/ecu/mcu", HTTP_GET, [](AsyncWebServerRequest *request) {
-      myECU = 6;
-      request->redirect("/");
-    });
+  "/ecu/mcu", HTTP_GET, [](AsyncWebServerRequest * request) {
+    myECU = 6;
+    request->redirect("/");
+  });
 
   server.on(
-    "/ecu/bms", HTTP_GET, [](AsyncWebServerRequest *request) {
-      myECU = 4;
-      request->redirect("/");
-    });
+  "/ecu/bms", HTTP_GET, [](AsyncWebServerRequest * request) {
+    myECU = 4;
+    request->redirect("/");
+  });
 
   server.on(
-    "/ecu/sub", HTTP_GET, [](AsyncWebServerRequest *request) {
-      myECU--;
-      //tempad--;
-      doLog(("select " + String(myECU, HEX)).c_str());
-      request->redirect("/");
-    });
+  "/ecu/sub", HTTP_GET, [](AsyncWebServerRequest * request) {
+    myECU--;
+    //tempad--;
+    doLog(("select " + String(myECU, HEX)).c_str());
+    request->redirect("/");
+  });
 
   server.on(
-    "/ecu/add", HTTP_GET, [](AsyncWebServerRequest *request) {
-      myECU++;
-      //tempad++;
-      doLog(("select " + String(myECU, HEX)).c_str());
-      request->redirect("/");
-    });
+  "/ecu/add", HTTP_GET, [](AsyncWebServerRequest * request) {
+    myECU++;
+    //tempad++;
+    doLog(("select " + String(myECU, HEX)).c_str());
+    request->redirect("/");
+  });
 
   server.on(
-    "/scan", HTTP_GET, [](AsyncWebServerRequest *request) {
-      fullRead++;
-      doLog("ECU scan start");
-      request->redirect("/");
-    });
+  "/scan", HTTP_GET, [](AsyncWebServerRequest * request) {
+    fullRead++;
+    doLog("ECU scan start");
+    request->redirect("/");
+  });
 
   server.on(
-    "/refresh", HTTP_GET, [](AsyncWebServerRequest *request) {
-      for (int u = 0; u < ECU32len; u++) {
-        ECU32buf[u] &= 0xff;
-      }
-      request->redirect("/");
-    });
+  "/refresh", HTTP_GET, [](AsyncWebServerRequest * request) {
+    for (int u = 0; u < ECU32len; u++) {
+      ECU32buf[u] &= 0xff;
+    }
+    request->redirect("/");
+  });
 
   server.on(
-    "/clear", HTTP_GET, [](AsyncWebServerRequest *request) {
-      for (int u = 0; u < ECU32len; u++) {
-        ECU32buf[u] = 0;
-      }
-      request->redirect("/");
-    });
+  "/clear", HTTP_GET, [](AsyncWebServerRequest * request) {
+    for (int u = 0; u < ECU32len; u++) {
+      ECU32buf[u] = 0;
+    }
+    request->redirect("/");
+  });
 
-  server.on("/bms/volt", HTTP_GET, [](AsyncWebServerRequest *request) {
+  server.on("/bms/volt", HTTP_GET, [](AsyncWebServerRequest * request) {
     request->send_P(200, "text/plain", String(getStatVars()).c_str());
   });
 
   server.on(
-    "/pktlog", HTTP_GET, [](AsyncWebServerRequest *request) {
-      sniffDump = 1;
-      request->redirect("/");
-    });
+  "/pktlog", HTTP_GET, [](AsyncWebServerRequest * request) {
+    sniffDump = 1;
+    request->redirect("/");
+  });
 
-  server.on("/tx", HTTP_GET, [](AsyncWebServerRequest *request) {
+  server.on("/tx", HTTP_GET, [](AsyncWebServerRequest * request) {
     char urlBuf[0x200];
     request->url().toCharArray(urlBuf, 0x200);
     int urlLen = request->url().length();
@@ -1496,87 +1679,87 @@ void setupAsyncServer() {
   });
 
   server.on(
-    "/set", HTTP_GET, [](AsyncWebServerRequest *request) {
-      if (request->hasParam("sniff")) {
-        sniffDump = 1;
-        doLog("sniffit");
-      }
-      if (request->hasParam("recover")) {
-        recovery = 1;
-        doLog("recover");
-      }
-      request->redirect("/");
-    });
+  "/set", HTTP_GET, [](AsyncWebServerRequest * request) {
+    if (request->hasParam("sniff")) {
+      sniffDump = 1;
+      doLog("sniffit");
+    }
+    if (request->hasParam("recover")) {
+      recovery = 1;
+      doLog("recover");
+    }
+    request->redirect("/");
+  });
 
   server.on(
-    "/", HTTP_GET, [](AsyncWebServerRequest *request) {
-      AsyncResponseStream *response = request->beginResponseStream("text/html");
+  "/", HTTP_GET, [](AsyncWebServerRequest * request) {
+    AsyncResponseStream *response = request->beginResponseStream("text/html");
 
-      File headers = SPIFFS.open("/header.html", "r");
-      while (headers.available()) {
-        String headerTmp = headers.readStringUntil('\n');
-        response->print(headerTmp);
-      }
-      headers.close();
+    File headers = SPIFFS.open("/header.html", "r");
+    while (headers.available()) {
+      String headerTmp = headers.readStringUntil('\n');
+      response->print(headerTmp);
+    }
+    headers.close();
 
-      response->print("<br><p>");
-      if (myECU == 4) {
-        response->print("<table class=greenTable><thead>");
-      } else if (myECU == 6) {
-        response->print("<table class=redTable><thead>");
-      } else {
-        response->print("<table class=blueTable><thead>");
-      }
-      response->print("<tr><th>" + String(myECU, HEX) + "</th>");
-      response->print("<th colspan=2>&lt;0&gt;</th><th colspan=2>&lt;1&gt;</th><th colspan=2>&lt;2&gt;</th><th colspan=2>&lt;3&gt;</th><th colspan=2>&lt;4&gt;</th><th colspan=2>&lt;5&gt;</th><th colspan=2>&lt;6&gt;</th><th colspan=2>&lt;7&gt;</th><th colspan=2>&lt;8&gt;</th><th colspan=2>&lt;9&gt;</th><th colspan=2>&lt;a&gt;</th><th colspan=2>&lt;b&gt;</th><th colspan=2>&lt;c&gt;</th><th colspan=2>&lt;d&gt;</th><th colspan=2>&lt;e&gt;</th><th colspan=2>&lt;f&gt;</th></tr>");
-      response->print("</thead><tbody>");
+    response->print("<br><p>");
+    if (myECU == 4) {
+      response->print("<table class=greenTable><thead>");
+    } else if (myECU == 6) {
+      response->print("<table class=redTable><thead>");
+    } else {
+      response->print("<table class=blueTable><thead>");
+    }
+    response->print("<tr><th>" + String(myECU, HEX) + "</th>");
+    response->print("<th colspan=2>&lt;0&gt;</th><th colspan=2>&lt;1&gt;</th><th colspan=2>&lt;2&gt;</th><th colspan=2>&lt;3&gt;</th><th colspan=2>&lt;4&gt;</th><th colspan=2>&lt;5&gt;</th><th colspan=2>&lt;6&gt;</th><th colspan=2>&lt;7&gt;</th><th colspan=2>&lt;8&gt;</th><th colspan=2>&lt;9&gt;</th><th colspan=2>&lt;a&gt;</th><th colspan=2>&lt;b&gt;</th><th colspan=2>&lt;c&gt;</th><th colspan=2>&lt;d&gt;</th><th colspan=2>&lt;e&gt;</th><th colspan=2>&lt;f&gt;</th></tr>");
+    response->print("</thead><tbody>");
 
-      // print a table of 16bit hexes
-      for (byte j = 0; j < 0x10; j++) {
-        String myStat = "";
+    // print a table of 16bit hexes
+    for (byte j = 0; j < 0x10; j++) {
+      String myStat = "";
 
-        //        myStat += "<span id=\"0x" + String(j, HEX) + "\"><tr><th>0x" + String(j, HEX) + "_</th>";
-        myStat += "<tr id=\"0x" + String(j, HEX) + "\"><th>0x" + String(j, HEX) + "_</th>";
+      //        myStat += "<span id=\"0x" + String(j, HEX) + "\"><tr><th>0x" + String(j, HEX) + "_</th>";
+      myStat += "<tr id=\"0x" + String(j, HEX) + "\"><th>0x" + String(j, HEX) + "_</th>";
 
-        for (byte i = 0; i < 0x20; i++) {
-          myStat += "<td>";
+      for (byte i = 0; i < 0x20; i++) {
+        myStat += "<td>";
 
-          int tmpval = (ECU32buf[(0x200 * (myECU)) + (j * 0x20) + i]);
-          int val = (tmpval & 0xff);
-          if (tmpval & ECU_changed) {
-            myStat += "<b>";
-          }
-          if (!((tmpval & ECU_read) | (tmpval & ECU_write))) {
-            myStat += "<small>";
-          }
-          myStat += (val < 0x10 ? "0" : "");
-          myStat += String(val, HEX) + "</td>";
-          if (!((tmpval & ECU_read) | (tmpval & ECU_write))) {
-            myStat += "</small>";
-          }
-          if (tmpval & ECU_changed) {
-            myStat += "</b>";
-          }
+        int tmpval = (ECU32buf[(0x200 * (myECU)) + (j * 0x20) + i]);
+        int val = (tmpval & 0xff);
+        if (tmpval & ECU_changed) {
+          myStat += "<b>";
         }
-        myStat += "</tr>";
-        response->print(myStat);
+        if (!((tmpval & ECU_read) | (tmpval & ECU_write))) {
+          myStat += "<small>";
+        }
+        myStat += (val < 0x10 ? "0" : "");
+        myStat += String(val, HEX) + "</td>";
+        if (!((tmpval & ECU_read) | (tmpval & ECU_write))) {
+          myStat += "</small>";
+        }
+        if (tmpval & ECU_changed) {
+          myStat += "</b>";
+        }
       }
+      myStat += "</tr>";
+      response->print(myStat);
+    }
 
-      response->print("</tbody></table><br><p>");
-      response->print("</body></html>");
-      request->send(response);
-    });
+    response->print("</tbody></table><br><p>");
+    response->print("</body></html>");
+    request->send(response);
+  });
 
   server.on(
-    "/favicon.ico", HTTP_GET, [](AsyncWebServerRequest *request) {
-      request->send(SPIFFS, "/favicon.ico", "image/vnd.microsoft.icon");
-    });
+  "/favicon.ico", HTTP_GET, [](AsyncWebServerRequest * request) {
+    request->send(SPIFFS, "/favicon.ico", "image/vnd.microsoft.icon");
+  });
 
   server.onNotFound(notFound);  // 404
   server.serveStatic("/fs", SPIFFS, "/");
 
   // web events
-  live.onConnect([](AsyncEventSourceClient *client) {
+  live.onConnect([](AsyncEventSourceClient * client) {
     client->send(hostname, NULL, timeNow, 10000);  // send connect event, id=timestamp, reconnect: 10000=1 second
   });
 

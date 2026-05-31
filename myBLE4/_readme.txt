@@ -16,6 +16,8 @@ various URLs are available:
 /log		- console output page
 /admin		- firmware updates
 /tx/3e0701b81000 - adds packet structure and sends supplied hex (in this example, read 16 bytes from the BMS starting at register 0xb8)
+/set?sniff	- logs packet data as hexdump
+
 
 
 note: recovery/safe mode is still sometimes needed!  gremlins persist, if having problems with firmware operations tap the gpio0 button immediately after module reset; LED will be solid white.
@@ -112,6 +114,7 @@ enjoy!
 --------------------
 changelog:
 
-add "display cell volts as trip odo" hack
-added autoTune experiment - adjust KERS as drive mode changes
+add "display voltage as remaining distance" hack
+added autoTune experiment - disable KERS regen in ECO for coasting efficiency
+added autoTune experiment - disable TCS in sport mode
 
