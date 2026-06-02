@@ -58,21 +58,29 @@ const byte VCU_BmsV = 0x19;   // BMS version cached
 const byte VCU_Bms2V = 0x1A;  // BMS2 version cached
 const byte VCU_FunDisplayBool = 0x1B;
 
+// prefs f3: 1f	6f	01	08	09	10	81	09	00	08
+// prefs gt3:0f	60	11	08	0d	89	21	83	03	08
+
 const byte VCU_Bool = 0x1C;  // vcu_status
 const byte VCU_Bool_Activated = (1 << 11);
+const byte VCU_Bool_DidIdleShutdown = (1 << 0);  //?
+const byte VCU_Bool_IsOff = (1 << 1);            //?
+// default gt3 1b: 0f	60	11	08	19	08	01	8b	03	21
+// default gt3 30: e2	a5	9f	01
 
-const byte VCU_FunBool = 0x1D;
+const byte VCU_FunBool = 0x1D;  // f3 default=0x1818, 1d89 current my gt3
 const byte VCU_FunBool_AbnormalityAlert = (1 << 15);
 const byte VCU_FunBool_TurnSignalSound = (1 << 11);
+const byte VCU_FunBool_ImpossibleUnlock = (1 << 8);  // setting 0 when Locking = frozen screen on gt3
 const byte VCU_FunBool_ParkOnSlope = (1 << 5);
-const byte VCU_FunBool_WalkEnable = (1 << 4);
+const byte VCU_FunBool_WalkEnable = (1 << 4);  // select from knob
 const byte VCU_FunBool_Imperial = (1 << 3);
 const byte VCU_FunBool_Locking = (1 << 2);
 const byte VCU_FunBool_TCS = (1 << 0);
 
 const byte VCU_FunBool2 = 0x1E;
-const byte VCU_FunBool2_RGenable = (1 << 9);  // race mode
-const byte VCU_FunBool2_SGenable = (1 << 8);  // sport mode
+const byte VCU_FunBool2_RGenable = (1 << 9);  // race gear enabled
+const byte VCU_FunBool2_SGenable = (1 << 8);  // sport gear enabled
 const byte VCU_FunBool2_SABS = (1 << 5);
 const byte VCU_FunBool2_AppSound = (1 << 0);
 
@@ -88,7 +96,7 @@ const byte VCU_InfoBool2 = 0x1F;                       // gt3pro reads 0x4000>0x
 const byte VCU_InfoBool2_ChargerConnected = (1 << 6);  // RO
 
 
-const byte VCU_PN = 0x20;
+const byte VCU_PN = 0x20;            // keepalive?  app sends 3e 16 01 20 repeatedly
 const byte VCU_InstumentKey = 0x2E;  // F3
 const byte VCU_BLE_HBPHASE = 0x2e;
 
@@ -151,7 +159,7 @@ const byte VCU_MaintainCode = 0x78;
 const byte VCU_EGear = 0x79;
 const byte VCU_DGear = 0x7A;
 
-const byte VCU_0x84_0x02 = 0x84;
+const byte VCU_GT3_TFT_PowerUp = 0x84;  // 23 16 02 84, turns on the VCU unlocked
 
 const byte VCU_MCUCPUId = 0xc0;  // len 0x0c, MCU_CPUId (02:0xDA)
 const byte VCU_MCUFlag = 0xc6;
@@ -166,8 +174,8 @@ const byte VCU_EncryptionFlag = 0xE8;
 const byte VCU_0xe9_0x02 = 0xe9;  // rw
 const byte VCU_0xf0_0x06 = 0xf0;  // fakeZT3 rw
 
-const byte VCU_0xfa_0x02 = 0xfa;  // gt3, 16bit counter?
-const byte VCU_0xff_0x02 = 0xff;  // gt3, 16bit counter?
+const byte VCU_0xfa_0x02 = 0xfa;  // f3/g3,gt3, 16bit counter?
+const byte VCU_0xff_0x02 = 0xff;  // f3/g3,gt3, 16bit counter?
 
 
 
@@ -355,7 +363,7 @@ const byte BLE_0xa5_0x02 = 0xa5;  // rw
 
 
 const byte ECU_TFT = 0x23;
-const byte CMD_TFT = 0x71;
+const byte CMD_TFT_setNavi = 0x71;
 const byte CMD_TFT_setNaviStart = 0x00;     // 0x71
 const byte CMD_TFT_setNaviDistance = 0x01;  // 0x71
 const byte CMD_TFT_setNaviInfo = 0x03;      // 0x71
