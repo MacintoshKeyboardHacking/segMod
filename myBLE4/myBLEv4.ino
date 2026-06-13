@@ -121,6 +121,8 @@ unsigned long timeRXifb[maxIFB + 1] = { 0 };
 int timeTXdelay[maxECU + 1] = { 0 };
 
 int sniffDump = 0;  // debug print packet hex to console
+int tamperRX = 0;   // debug print packet hex to console
+
 
 // convenience pointer
 byte *RXptr;
@@ -922,6 +924,22 @@ void doRXdecode() {
         }
 
         addr = ECUbank(tmp[3]) * 0x200;
+
+        // corrupt response hack
+        if (tamperRX & (tmp[4] != MY_ECU)) {
+          // & ((tmp[6] == 0x1b) | (tmp[6] == 0x2f) | (tmp[6] == 0x30) | (tmp[6] == 0x31) | (tmp[6] == 0x32) | (tmp[6] == 0x33)))
+          //doLog("modN ");
+          byte t = 0;
+          while (t < tmp[2]) {
+            tmp[7 + t] = ECU32buf[addr + (tmp[6] * 2) + t] & 0xff;
+            t++;
+          }
+          //tmp[7] = ECU32buf[addr + (tmp[6] * 2)] & 0xff;
+          //tmp[8] = ECU32buf[addr + (tmp[6] * 2) + 1] & 0xff;
+          addr = 0;
+          break;
+        }
+
         if (tmp[4] != MY_ECU) {
           newFlags |= ECU_read;
         }
@@ -1273,6 +1291,9 @@ void loop() {
           int oVolts = (lastVolts - 50) / 100;  // looks great on F3, no decimal on GT3
           TXpktBuf[0x08] = oVolts & 0xff;       // debug volts in remaining range
           TXpktBuf[0x09] = (oVolts >> 8) & 0xff;
+
+          subVal[subReg(SUB_UPPUSH)] = 0;
+
 
           subSet();  // repack sub buffer
         }
@@ -1668,11 +1689,11 @@ void setupAsyncServer() {
 
     int p = 0;
     for (int i = 4; i < urlLen; i += 2) {
-      //doLog(String(hexByte(&urlBuf[i])).c_str());
       p++;
       TXpktBuf[p] = hexByte(&urlBuf[i]);
     }
     TXpktBuf[0] = (p - 4);
+    doRXdecode();
     pktSend(0x0e);
 
     request->send(200, "text/plain", String(urlBuf));
@@ -1683,6 +1704,10 @@ void setupAsyncServer() {
       if (request->hasParam("sniff")) {
         sniffDump = 1;
         doLog("sniffit");
+      }
+      if (request->hasParam("tamper")) {
+        tamperRX = 1;
+        doLog("tamper");
       }
       if (request->hasParam("recover")) {
         recovery = 1;

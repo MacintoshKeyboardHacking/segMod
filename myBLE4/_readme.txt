@@ -119,3 +119,5 @@ added autoTune experiment - disable KERS regen in ECO for coasting efficiency
 added autoTune experiment - disable TCS in sport mode
 
 testing bluetooth, disabled by default for space reasons
+testing variable patch system
+more variables
