@@ -107,7 +107,7 @@ void setup() {
   // BLE Device
   BLEDevice::init("ESP32");
   pServer = BLEDevice::createServer();
-  pServer->setCallbacks(new MyServerCallbacks());
+  pServer->setCallbacks(new MyServer mmCallbacks());
   BLEService *pService = pServer->createService(UART);
 
   // UART TX
