@@ -511,7 +511,7 @@ void setup() {
   BLE.begin(115200, SERIAL_8N1, RXD2, TXD2);
 
   while (!VCU || !BLE) {
-    ;
+    yield();
   }
   doLog("SETUP");
 
@@ -559,11 +559,13 @@ void setup() {
     rxBytes = BLE.readBytes(RXbuf, rxBS);
     if (rxBytes) {
       VCU.write(RXbuf, rxBytes);
+      Serial.write(RXbuf, rxBytes);
     }
-
+    yield();
     rxBytes = VCU.readBytes(RXbuf, rxBS);
     if (rxBytes) {
       BLE.write(RXbuf, rxBytes);
+      Serial.write(RXbuf, rxBytes);
     }
     yield();
   }
@@ -909,7 +911,7 @@ void doRXdecode() {
           break;
         }
         if ((tmp[4] == ECU_TFT) & (tmp[6] == 0xfe)) {
-          addr = 0x304;  // kludge, receive subscription parameters at ecu bank 2
+          addr = 0x304;  // kludge, receive subscription parameters at ecu bank 2, reg 0x80+
           break;
         }
 
@@ -995,7 +997,7 @@ void IRAM_ATTR pktXmitBuf(const int mask) {
       myStat += String(val, HEX);
     }
     if (sniffDump) {
-      if (((*TXpktArg != 0xfe) | (*TXpktDst != 0x23)) & ((*TXpktArg != 0xfc) | ((*TXpktDst != 0x23) & (*TXpktSrc != 0x23))) & ((*TXpktArg != 0xd2) | ((*TXpktDst != 0x16) & (*TXpktSrc != 0x23)))) {
+      if ((1 | (*TXpktArg != 0xfe) | (*TXpktDst != 0x23)) & ((*TXpktArg != 0xfc) | ((*TXpktDst != 0x23) & (*TXpktSrc != 0x23))) & ((*TXpktArg != 0xd2) | ((*TXpktDst != 0x16) & (*TXpktSrc != 0x23)))) {
         doLog(myStat.c_str());
       }
     } else {
@@ -1192,9 +1194,13 @@ void loop() {
   static int lastGear = 0;
   static int myKers = 1;
   static int myTCS = 1;
+  static int myUPass = 1;
+
 
   static int lastKers = 0;
   static int lastTCS = 1;
+  static int lastUPass = 0;
+
   static int myHWver = 0;
 
   while (doRun) {
@@ -1256,10 +1262,12 @@ void loop() {
             lastGear = myGear;
             if (myGear == 2) {  // eco
               myKers = 0;
+              myUPass = 1;
               myTCS = 1;
             }
             if (myGear == 3) {  // sport
               myKers = 1;
+              myUPass = 0;
               if (myHWver == 1) {
                 myTCS = 0;
               }
@@ -1268,14 +1276,16 @@ void loop() {
               }
             }
             if (myGear == 4) {  // race
+              myHWver = 2;      // GT3
               myKers = 1;       // was 2...
-              myTCS = 0;
-              myHWver = 2;  // GT3
+              myUPass = 0;
+              //myTCS = 0;  // not needed, autodisabled on GT3Pro
             }
             if (myGear == 5) {  // drive
+              myHWver = 1;      // F3/G3
               myKers = 1;
-              myTCS = 1;
-              myHWver = 1;  // F3/G3
+              myUPass = 1;
+              myTCS = 0;
             }
           }
 
@@ -1291,6 +1301,10 @@ void loop() {
           int oVolts = (lastVolts - 50) / 100;  // looks great on F3, no decimal on GT3
           TXpktBuf[0x08] = oVolts & 0xff;       // debug volts in remaining range
           TXpktBuf[0x09] = (oVolts >> 8) & 0xff;
+
+          TXpktBuf[0x13] = 0;  // disable overspeed BUG such a mess!
+          //TXpktBuf[0x1E] = 0; // disable hillassist display
+
 
           subVal[subReg(SUB_UPPUSH)] = 0;
 
@@ -1331,6 +1345,7 @@ void loop() {
     if (tickFast) {
       tickFast = 0;
       int mask = 0x0e;
+
       if (myKers != lastKers) {
         lastKers = myKers;
         if (myKers == 0) {
@@ -1343,17 +1358,29 @@ void loop() {
           pktXmitCmd(mask, xK2);
         }
       }
+
       if (myTCS != lastTCS) {
         lastTCS = myTCS;
         if (myTCS == 0) {
           byte xTCS[] = { 0x02, MY_ECU, 0x16, 0x02, 0x1d, ECUbuf[(ECUbank(ECU_VCU) * 0x200 * 4) + (0x1d * 2 * 4)] & 0xfe, ECUbuf[(ECUbank(ECU_VCU) * 0x200 * 4) + (0x1d * 2 * 4) + 4] & 0xff };
-
           //byte xTCS[] = { 0x02, MY_ECU, ECU_VCU, CMD_WRITE, VCU_FunBool, ECUbuf[(ECUbank(ECU_VCU) * 0x200 * 4) + (VCU_FunBool * 2 * 4)] & ~VCU_FunBool_TCS }; // BUG should work but doesn't
           pktXmitCmd(mask, xTCS);
         }
         if (myTCS == 1) {
           byte xTCS[] = { 0x02, MY_ECU, 0x16, 0x02, 0x1d, (ECUbuf[(ECUbank(ECU_VCU) * 0x200 * 4) + (0x1d * 2 * 4)] & 0xfe) + 1, ECUbuf[(ECUbank(ECU_VCU) * 0x200 * 4) + (0x1d * 2 * 4) + 4] & 0xff };
           pktXmitCmd(mask, xTCS);
+        }
+      }
+
+      if (myUPass != lastUPass) {
+        lastUPass = myUPass;
+        if (myUPass == 0) {
+          byte xUPa[] = { 0x02, MY_ECU, 0x16, 0x02, 0x1e, ECUbuf[(ECUbank(ECU_VCU) * 0x200 * 4) + (0x1e * 2 * 4)] & 0xfb, ECUbuf[(ECUbank(ECU_VCU) * 0x200 * 4) + (0x1e * 2 * 4) + 4] & 0xff };
+          pktXmitCmd(mask, xUPa);
+        }
+        if (myUPass == 1) {
+          byte xUPa[] = { 0x02, MY_ECU, 0x16, 0x02, 0x1e, (ECUbuf[(ECUbank(ECU_VCU) * 0x200 * 4) + (0x1e * 2 * 4)] & 0xfb) + 4, ECUbuf[(ECUbank(ECU_VCU) * 0x200 * 4) + (0x1e * 2 * 4) + 4] & 0xff };
+          pktXmitCmd(mask, xUPa);
         }
       }
     }

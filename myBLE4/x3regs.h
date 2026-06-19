@@ -54,6 +54,8 @@ const byte VCU_CMD_openAccTimeout = 0x79;  // 0x79 0x00
 const byte VCU_CMD_openAcc = 0x79;         // 0x79 0x00 0x01 0x00
 const byte VCU_CMD_closeAcc = 0x79;        // 0x79 0x00 0x02 0x00
 
+const byte VCU_CMD_setDefault = 0x80;  // 0x80 0x00
+
 const byte VCU_SN = 0x10;     // len 0x0e
 const byte VCU_CtrlV = 0x17;  // VCU version
 const byte VCU_MCUV = 0x18;   // MCU version cached
@@ -72,9 +74,13 @@ const byte VCU_FunDisplayBool_Location = (1 << 1);        // app: vehicle locati
 
 const byte VCU_Bool = 0x1C;  // vcu_status
 const byte VCU_Bool_Activated = (1 << 11);
-const byte VCU_Bool_DidIdleShutdown = (1 << 0);  //?
+
+const byte VCU_Bool_IsCharging = (1 << 2);       // f3: 07 charging
 const byte VCU_Bool_IsOff = (1 << 1);            //?
+const byte VCU_Bool_DidIdleShutdown = (1 << 0);  //?
+
 // default gt3 1b: 0f 60  11  08  19  08  01  8b  03  21
+// f3                             18	18	81	09	43	08
 // default gt3 30: e2 a5  9f  01
 
 const byte VCU_FunBool = 0x1D;  // f3 default=0x1818, 1d89 current my gt3
@@ -82,7 +88,7 @@ const byte VCU_FunBool_AbnormalityAlert = (1 << 15);
 const byte VCU_FunBool_Cruise = (1 << 12);  // xiao
 const byte VCU_FunBool_TurnSignalSound = (1 << 11);
 const byte VCU_FunBool_Boost = (1 << 10);
-const byte VCU_FunBool_ComboUnlock = (1 << 8);  // unlock method=pattern?  setting 0 when Locking = frozen screen on gt3
+const byte VCU_FunBool_ComboUnlock = (1 << 8);  // unlock method=pattern?  setting 0 when Locked gives gt3 frozen screen
 const byte VCU_FunBool_unkF3 = (1 << 7);        // unknown, set on F3?
 const byte VCU_FunBool_ParkOnSlope = (1 << 5);
 const byte VCU_FunBool_WalkEnable = (1 << 4);  // select from knob
@@ -93,9 +99,10 @@ const byte VCU_FunBool_TCS = (1 << 0);
 const byte VCU_FunBool2 = 0x1E;                     // f3,gt3 max bfff
 const byte VCU_FunBool2_unkGT3 = (1 << 15);         //
 const byte VCU_FunBool2_0x4000 = (1 << 14);         //  GT3,F3 RO fixed 0?
-const byte VCU_FunBool2_MotorBrake = (1 << 11);     // xiao
+const byte VCU_FunBool2_MotorBrake = (1 << 11);     // xiao; gt3 brake priority?
 const byte VCU_FunBool2_RGenable = (1 << 9);        // race gear enabled
 const byte VCU_FunBool2_SGenable = (1 << 8);        // sport gear enabled
+const byte VCU_FunBool2_unkF3 = (1 << 7);           // ? set on F3
 const byte VCU_FunBool2_SABS = (1 << 5);            // labs
 const byte VCU_FunBool2_DownhillAssist = (1 << 4);  // labs
 const byte VCU_FunBool2_ControlAssist = (1 << 3);   // labs: "slowdown when speed wobble"
@@ -107,6 +114,7 @@ const byte VCU_FunBool3_FrontLamp = (1 << 11);
 const byte VCU_FunBool3_DisableAlarmAfterFold = (1 << 9);
 const byte VCU_FunBool3_PowerOffAfterFold = (1 << 8);
 const byte VCU_FunBool3_CancelReservedCharge = (1 << 7);  // WO? reads 0. set to 1, GT3Pro "reserved charging cancelled"
+const byte VCU_FunBool3_unkF3 = (1 << 6);                 // ? set on F3
 const byte VCU_FunBool3_ContinueCharging = (1 << 5);      // test, does this apply to "topping off"?
 const byte VCU_FunBool3_ScheduledCharging = (1 << 4);
 const byte VCU_FunBool3_Underglow = (1 << 2);
@@ -210,7 +218,7 @@ const byte VCU_MaintainCode = 0x78;
 const byte VCU_EGear = 0x79;
 const byte VCU_DGear = 0x7A;
 
-const byte VCU_GT3_TFT_PowerUp = 0x84;  // 23 16 02 84, turns on the VCU unlocked
+const byte VCU_GT3_TFT_PowerUp = 0x84;  // 23 16 02 84, turns on the GT3 VCU unlocked
 
 const byte VCU_0xaa_0x1a = 0xaa;  // blocks don't read
 const byte VCU_0xb7_0x0c = 0xb7;  // blocks don't write
@@ -510,19 +518,19 @@ const byte TFT_SUBbase = 0xfe;
 
 
 // 16bits
-const unsigned long SUB_7e765289 = 0x7e765289;
+const unsigned long SUB_7e765289 = 0x7e765289;    // f3 watts (2e: 05)
 const unsigned long SUB_DistRemain = 0xddaa7a89;  // max 3 digits fit GT3
 const unsigned long SUB_TripDist = 0xac440ac5;    // 1 mile on GT3, .1 miles on G3/F3
 const unsigned long SUB_a3ddd1b3 = 0xa3ddd1b3;
 const unsigned long SUB_a3ddd1b2 = 0xa3ddd1b2;
 const unsigned long SUB_a3ddd1ad = 0xa3ddd1ad;
-const unsigned long SUB_a3ddd1ac = 0xa3ddd1ac;
+const unsigned long SUB_a3ddd1ac = 0xa3ddd1ac;  // "00 01"=overspeed
 const unsigned long SUB_a3ddd1af = 0xa3ddd1af;
 const unsigned long SUB_Speed = 0x6fe56c44;
 const unsigned long SUB_ad4a48ae = 0xad4a48ae;
 const unsigned long SUB_9096f99e = 0x9096f99e;
 const unsigned long SUB_Boost = 0x9c9b65e4;
-const unsigned long SUB_229a0092 = 0x229a0092;
+const unsigned long SUB_229a0092 = 0x229a0092;  // "01 00"=bumpy?
 const unsigned long SUB_8afa54a3 = 0x8afa54a3;  // f3
 
 // 8bits
